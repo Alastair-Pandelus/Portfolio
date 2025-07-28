@@ -361,7 +361,8 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Example JSON files
 /Portfolio/appsettings.json
-/Portfolio/Scrape/Model/RiskAndRatings/Amundi.json
-/Portfolio/Scrape/Model/RiskAndRatings/Ranmore.json
-/Portfolio/Scrape/Model/Chart/ChartResult.json
+/Portfolio/Scrape/Model/RiskAndRatings/*.json
+/Portfolio/Scrape/Model/Chart/*.json
