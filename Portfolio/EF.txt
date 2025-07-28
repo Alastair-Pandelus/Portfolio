@@ -1,0 +1,8 @@
+﻿cd Portfolio
+
+dotnet ef migrations add NameHere
+
+dotnet ef database update
+dotnet ef database update <previous-migration-name>
+
+dotnet ef migrations remove
