@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using System.Reflection;
 
 namespace Portfolio.EntityModel;
 
@@ -19,6 +20,7 @@ public partial class PortfolioContext : DbContext
     public virtual DbSet<PriceDate> DateRange { get; set; }
     public virtual DbSet<Portfolio> Portfolio { get; set; }
     public virtual DbSet<PortfolioHolding> PortfolioHolding { get; set; }
+    public virtual DbSet<ProxyInstrument> ProxyInstrument { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -32,5 +34,11 @@ public partial class PortfolioContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<InstrumentMonthlyDelta>().ToView("InstrumentMonthlyDelta");
+
+        modelBuilder.Entity<ProxyInstrument>()
+                .HasOne(pi => pi.Proxy)
+                .WithMany(i => i.Proxies)
+                .HasForeignKey(pi => pi.ProxyId)
+                .OnDelete(DeleteBehavior.NoAction);
     }
 }

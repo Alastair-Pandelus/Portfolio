@@ -8,6 +8,8 @@ public partial class Instrument
 {
     public int Id { get; set; }
 
+    public virtual ICollection<ProxyInstrument> Proxies { get; set; } = [];
+
     public string InstrumentType { get; set; } 
 
     [JsonPropertyName("name")]
