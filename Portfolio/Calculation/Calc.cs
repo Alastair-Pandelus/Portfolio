@@ -8,6 +8,7 @@ namespace Portfolio.Calculation
         public Task SynthesiseMissingPrices();
         public Task SetMaxDrawdown();
         public Task SetMarketCorrelations();
+        public Task SetPriceDeltas();
         //public Task GetCorrelations();
     }
 
@@ -126,6 +127,32 @@ namespace Portfolio.Calculation
                     Console.WriteLine($"[{count} of {instruments.Count}] Instrument: {instrument.Name}, Correlation with ACWI: {correlation:F4}");
                 }
             });
+        }
+
+        public async Task SetPriceDeltas()
+        {
+            using var context = new PortfolioContext();
+            var dbInstruments = context.Set<Instrument>();
+
+            var instruments = await dbInstruments.FromSqlRaw
+                (
+                    @"select * from dbo.Instrument i
+	                    where exists(select * from dbo.Price P where P.InstrumentId = i.Id)"
+               )
+               .ToListAsync();
+
+            foreach (var instrument in instruments)
+            {
+                var instrumentEntry = context.Entry(instrument);
+
+                await instrumentEntry
+                    .Collection(i => i.Prices)
+                    .LoadAsync();
+
+                await instrumentEntry
+                    .Collection(i => i.Proxies)
+                    .LoadAsync();
+            }
         }
 
         //public async Task GetCorrelations()

@@ -21,6 +21,7 @@ public partial class PortfolioContext : DbContext
     public virtual DbSet<Portfolio> Portfolio { get; set; }
     public virtual DbSet<PortfolioHolding> PortfolioHolding { get; set; }
     public virtual DbSet<ProxyInstrument> ProxyInstrument { get; set; }
+    public virtual DbSet<AdjustedReturn> AdjustedReturn { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {

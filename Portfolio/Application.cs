@@ -25,8 +25,9 @@ public class Application
         //await _scraper.ScrapePrices();
 
         //await _calc.SynthesiseMissingPrices();
+        await _calc.SetPriceDeltas();
         //await _calc.SetMaxDrawdown();
-        await _calc.SetMarketCorrelations();
+        //await _calc.SetMarketCorrelations();
         //await _calc.GetCorrelations();
 
         //Console.WriteLine(await response.Content.ReadAsStringAsync());

@@ -3,6 +3,10 @@
 dotnet ef migrations add NameHere
 
 dotnet ef database update
+
+
+# use update to revert the DB to a specific migration
 dotnet ef database update <previous-migration-name>
 
+# use remove to revert the last migration - DB must be reverted first
 dotnet ef migrations remove
