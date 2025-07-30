@@ -8,7 +8,8 @@ namespace Portfolio.Calculation
         public Task SynthesiseMissingPrices();
         public Task SetMaxDrawdown();
         public Task SetMarketCorrelations();
-        public Task SetPriceDeltas();
+        public Task SetProxyInstruments();
+        public Task SetAdjustedReturns();
         //public Task GetCorrelations();
     }
 
@@ -129,15 +130,31 @@ namespace Portfolio.Calculation
             });
         }
 
-        public async Task SetPriceDeltas()
+        public async Task SetProxyInstruments()
         {
             using var context = new PortfolioContext();
             var dbInstruments = context.Set<Instrument>();
 
+            var ranmoreGlobalEquityInstitutionalGBP = await dbInstruments
+                .FirstOrDefaultAsync(i => i.Name == "Ranmore Global Equity Institutional GBP");
+
+            var ranmoreGlobalEquityInvestorGBP = await dbInstruments
+                .FirstOrDefaultAsync(i => i.Name == "Ranmore Global Equity Investor GBP");
+
+            var dbProxies = context.Set<ProxyInstrument>();
+        }
+
+        public async Task SetAdjustedReturns()
+        {
+            using var context = new PortfolioContext();
+            var dbInstruments = context.Set<Instrument>();
+            var dbPrices = context.Set<Price>();
+
             var instruments = await dbInstruments.FromSqlRaw
                 (
                     @"select * from dbo.Instrument i
-	                    where exists(select * from dbo.Price P where P.InstrumentId = i.Id)"
+	                    where exists(select * from dbo.Price P where P.InstrumentId = i.Id) 
+                        and id=3252"
                )
                .ToListAsync();
 
@@ -152,6 +169,10 @@ namespace Portfolio.Calculation
                 await instrumentEntry
                     .Collection(i => i.Proxies)
                     .LoadAsync();
+
+                var proxyPrices = await dbPrices
+                    .Where(p => instrument.Proxies.Any(pr => pr.ProxyId == p.InstrumentId))
+                    .ToListAsync();
             }
         }
 
