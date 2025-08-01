@@ -39,7 +39,7 @@ public partial class PortfolioContext : DbContext
         modelBuilder.Entity<ProxyInstrument>()
                 .HasOne(pi => pi.Proxy)
                 .WithMany(i => i.Proxies)
-                .HasForeignKey(pi => pi.ProxyId)
+                .HasForeignKey(pi => pi.InstrumentId)
                 .OnDelete(DeleteBehavior.NoAction);
     }
 }

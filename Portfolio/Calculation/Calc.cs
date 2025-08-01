@@ -1,4 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query.Internal;
+using Polly;
 using Portfolio.EntityModel;
 
 namespace Portfolio.Calculation
@@ -153,27 +155,149 @@ namespace Portfolio.Calculation
             var instruments = await dbInstruments.FromSqlRaw
                 (
                     @"select * from dbo.Instrument i
-	                    where exists(select * from dbo.Price P where P.InstrumentId = i.Id) 
-                        and id=3252"
+	                    where exists(select * from dbo.Price P where P.InstrumentId = i.Id) and
+                        not exists (select * from dbo.AdjustedReturn A where A.InstrumentId = i.Id)"
                )
+               .Include(i => i.Proxies)
                .ToListAsync();
 
+            int count = 0;
             foreach (var instrument in instruments)
             {
-                var instrumentEntry = context.Entry(instrument);
-
-                await instrumentEntry
-                    .Collection(i => i.Prices)
-                    .LoadAsync();
-
-                await instrumentEntry
-                    .Collection(i => i.Proxies)
-                    .LoadAsync();
-
-                var proxyPrices = await dbPrices
-                    .Where(p => instrument.Proxies.Any(pr => pr.ProxyId == p.InstrumentId))
-                    .ToListAsync();
+                await SetInstrumentAdjustedReturns(dbInstruments, context, instrument);
+                Console.WriteLine($"[{++count} of {instruments.Count}] - Set Adjusted Returns for Instrument: {instrument.Name} (ISIN: {instrument.ISIN})");
             }
+        }
+
+        public async Task SetInstrumentAdjustedReturns(DbSet<Instrument> dbInstruments, PortfolioContext context, Instrument instrument)
+        {
+            var instrumentEntry = context.Entry(instrument);
+
+            Dictionary<int, List<Price>> prices = [];
+
+            await instrumentEntry
+                .Collection(i => i.Prices)
+                .LoadAsync();
+
+            prices[instrument.Id] = [.. instrument.Prices.OrderByDescending(p => p.Date)];
+
+            DateOnly? minSharedProxyInstrumentPriceDate = null;
+            foreach (var proxy in instrument.Proxies)
+            {
+                minSharedProxyInstrumentPriceDate = await GetProxyPrices(dbInstruments, prices, minSharedProxyInstrumentPriceDate, proxy);
+            }
+
+            // Get proxy prices for dates greater than or equal to the minimum shared proxy instrument price date
+            if (minSharedProxyInstrumentPriceDate.HasValue)
+            {
+                foreach (var proxy in instrument.Proxies)
+                {
+                    prices[proxy.ProxyId] = [.. prices[proxy.ProxyId].Where(p => p.Date >= minSharedProxyInstrumentPriceDate.Value)];
+                }
+            }
+
+            await instrumentEntry
+                    .Collection(i => i.AdjustedReturns)
+                    .LoadAsync();
+
+            var adjustedReturns = instrument.AdjustedReturns;
+
+            DateOnly? currentDate = null;    
+            for (int i = 0; i < prices[instrument.Id].Count - 1; i++)
+            {
+                var currentPrice = prices[instrument.Id][i];
+                var previousPrice = prices[instrument.Id][i + 1];
+                currentDate = currentPrice.Date;
+
+                var adjustedReturn = new AdjustedReturn
+                {
+                    InstrumentId = instrument.Id,
+                    Date = currentPrice.Date,
+                    LogValue = Math.Log(currentPrice.Value / previousPrice.Value)
+                };
+
+                var existingReturn = adjustedReturns.FirstOrDefault(ar => ar.Date == adjustedReturn.Date);
+
+                if(existingReturn != null)
+                {
+                    // If an adjusted return already exists for this date, update it
+                    existingReturn.LogValue = adjustedReturn.LogValue;
+                }
+                else
+                {
+                    // Otherwise, add the new adjusted return
+                    adjustedReturns.Add(adjustedReturn);
+                }
+            }
+
+            if (minSharedProxyInstrumentPriceDate != null && currentDate != null)
+            {
+                var proxyPricesOffset 
+                    = prices[instrument.Proxies.First().ProxyId]
+                        .FindIndex(p => p.Date < currentDate);
+
+                var firstProxy = instrument.Proxies.First();
+                for (int j=proxyPricesOffset; j < prices[firstProxy.ProxyId].Count - 1; j++)
+                {
+                    var priceDelta = GetWeightedProxyPriceDelta(instrument.Proxies, prices, j);
+
+                    var adjustedReturn = new AdjustedReturn
+                    {
+                        InstrumentId = instrument.Id,
+                        Date = prices[firstProxy.ProxyId][j].Date,
+                        LogValue = Math.Log(priceDelta)
+                    };
+                    var existingReturn = adjustedReturns.FirstOrDefault(ar => ar.Date == adjustedReturn.Date);
+                    if (existingReturn != null)
+                    {
+                        // If an adjusted return already exists for this date, update it
+                        existingReturn.LogValue = adjustedReturn.LogValue;
+                    }
+                    else
+                    {
+                        // Otherwise, add the new adjusted return
+                        adjustedReturns.Add(adjustedReturn);
+                    }
+                }
+            }
+
+            await context.SaveChangesAsync();
+        }
+
+        private double GetWeightedProxyPriceDelta(ICollection<ProxyInstrument> proxies, Dictionary<int, List<Price>> prices, int priceOffset)
+        {
+            var weightedValue = 0.0;
+
+            foreach (var proxy in proxies)
+            {
+                weightedValue += (proxy.Weight * prices[proxy.ProxyId][priceOffset].Value / prices[proxy.ProxyId][priceOffset+1].Value);
+            }
+            return weightedValue;
+        }
+
+        private static async Task<DateOnly?> GetProxyPrices(DbSet<Instrument> dbInstruments, Dictionary<int, List<Price>> prices, DateOnly? minSharedProxyInstrumentPriceDate, ProxyInstrument proxy)
+        {
+            var proxyInstrument = await dbInstruments
+                .Include(i => i.Prices)
+                .FirstOrDefaultAsync(i => i.Id == proxy.ProxyId);
+
+            var minProxyInstrumentDate = proxyInstrument.Prices.Select(p => p.Date).Min().ToDateTime(TimeOnly.MinValue);
+
+            if (minSharedProxyInstrumentPriceDate == null)
+            {
+                minSharedProxyInstrumentPriceDate = DateOnly.FromDateTime(minProxyInstrumentDate);
+            }
+            else
+            {
+                if(minProxyInstrumentDate.Ticks > minSharedProxyInstrumentPriceDate.Value.ToDateTime(TimeOnly.MinValue).Ticks)
+                {
+                    // If the proxy instrument date starts later than the shared date, update the shared date
+                    minSharedProxyInstrumentPriceDate = DateOnly.FromDateTime(minProxyInstrumentDate);
+                }
+            }
+
+            prices[proxyInstrument.Id] = [.. proxyInstrument.Prices.OrderByDescending(p => p.Date)];
+            return minSharedProxyInstrumentPriceDate;
         }
 
         //public async Task GetCorrelations()
@@ -327,19 +451,20 @@ namespace Portfolio.Calculation
             });
         }
 
-        private static double? CalculateMaxDrawdown(List<Price> prices)
+        private static double? CalculateMaxDrawdown(ICollection<Price> prices)
         {
-            prices = prices.Where(p => p.Date >= System.DateOnly.FromDateTime(DateTime.Now.AddYears(-5)))
-                           .OrderBy(p => p.Date)
-                           .ToList();
+            var pricesList 
+                = prices.Where(p => p.Date >= System.DateOnly.FromDateTime(DateTime.Now.AddYears(-5)))
+                        .OrderBy(p => p.Date)
+                        .ToList();
 
             if (prices == null || prices.Count < 2)
             {
                 return null;
             }
             double maxDrawdown = 0.0;
-            double peak = prices[0].Value;
-            foreach (var price in prices)
+            double peak = pricesList[0].Value;
+            foreach (var price in pricesList)
             {
                 if (price.Value > peak)
                 {

@@ -8,7 +8,9 @@ public partial class Instrument
 {
     public int Id { get; set; }
 
+    public virtual ICollection<Price> Prices { get; set; }
     public virtual ICollection<ProxyInstrument> Proxies { get; set; } = [];
+    public virtual ICollection<AdjustedReturn> AdjustedReturns { get; set; } = [];
 
     public string InstrumentType { get; set; } 
 
@@ -154,9 +156,7 @@ public partial class Instrument
     public int? BondHoldings { get; set; }
     public int? RiskRating { get; set; }
     public double? MaxDrawdown { get; set; }
-
     public double? Correlation { get; set; }
-    public List<Price> Prices { get; set; }
     public bool Watchlist { get; set; } = false;
     public string Comment { get; set; } = string.Empty;
 }

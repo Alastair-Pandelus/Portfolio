@@ -9,7 +9,7 @@
         // Storing as log has advantage of being additive
         public double LogValue { get; set; }
 
-        public System.DateOnly Date { get; set; }
+        public DateOnly Date { get; set; }
         public int InstrumentId { get; set; }
         public Instrument Instrument { get; set; }
     }

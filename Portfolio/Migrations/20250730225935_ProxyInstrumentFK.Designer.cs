@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Portfolio.EntityModel;
 
@@ -11,9 +12,11 @@ using Portfolio.EntityModel;
 namespace Portfolio.Migrations
 {
     [DbContext(typeof(PortfolioContext))]
-    partial class PortfolioContextModelSnapshot : ModelSnapshot
+    [Migration("20250730225935_ProxyInstrumentFK")]
+    partial class ProxyInstrumentFK
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -43,7 +46,7 @@ namespace Portfolio.Migrations
 
                     b.HasIndex("InstrumentId");
 
-                    b.ToTable("AdjustedReturn", (string)null);
+                    b.ToTable("AdjustedReturn");
                 });
 
             modelBuilder.Entity("Portfolio.EntityModel.Correlation", b =>
@@ -65,7 +68,7 @@ namespace Portfolio.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Correlation", (string)null);
+                    b.ToTable("Correlation");
                 });
 
             modelBuilder.Entity("Portfolio.EntityModel.Instrument", b =>
@@ -310,7 +313,7 @@ namespace Portfolio.Migrations
                         .IsUnique()
                         .HasFilter("[InstrumentType] IS NOT NULL AND [Sedol] IS NOT NULL AND [ISIN] IS NOT NULL AND [ExchangeCode] IS NOT NULL AND [Currency] IS NOT NULL");
 
-                    b.ToTable("Instrument", (string)null);
+                    b.ToTable("Instrument");
                 });
 
             modelBuilder.Entity("Portfolio.EntityModel.InstrumentMonthlyDelta", b =>
@@ -342,7 +345,7 @@ namespace Portfolio.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Portfolio", (string)null);
+                    b.ToTable("Portfolio");
                 });
 
             modelBuilder.Entity("Portfolio.EntityModel.PortfolioHolding", b =>
@@ -368,7 +371,7 @@ namespace Portfolio.Migrations
 
                     b.HasIndex("PortfolioId");
 
-                    b.ToTable("PortfolioHolding", (string)null);
+                    b.ToTable("PortfolioHolding");
                 });
 
             modelBuilder.Entity("Portfolio.EntityModel.Price", b =>
@@ -392,7 +395,7 @@ namespace Portfolio.Migrations
 
                     b.HasIndex("InstrumentId");
 
-                    b.ToTable("Price", (string)null);
+                    b.ToTable("Price");
                 });
 
             modelBuilder.Entity("Portfolio.EntityModel.PriceDate", b =>
@@ -400,7 +403,7 @@ namespace Portfolio.Migrations
                     b.Property<DateOnly>("Value")
                         .HasColumnType("date");
 
-                    b.ToTable("DateRange", (string)null);
+                    b.ToTable("DateRange");
                 });
 
             modelBuilder.Entity("Portfolio.EntityModel.ProxyInstrument", b =>
@@ -429,7 +432,7 @@ namespace Portfolio.Migrations
 
                     b.HasIndex("InstrumentId1");
 
-                    b.ToTable("ProxyInstrument", (string)null);
+                    b.ToTable("ProxyInstrument");
                 });
 
             modelBuilder.Entity("Portfolio.EntityModel.AdjustedReturn", b =>
