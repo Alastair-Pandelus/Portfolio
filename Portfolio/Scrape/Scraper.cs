@@ -18,6 +18,7 @@ namespace Portfolio.Scrape
         Task ScrapeYSymbols();
         Task ScrapeRisk();
         Task ScrapePrices();
+        Task AddMissingInstruments();
     };
 
     public class Scraper : IScraper
@@ -658,6 +659,39 @@ namespace Portfolio.Scrape
             }
 
             return addedValues;
+        }
+
+        public async Task AddMissingInstruments()
+        {
+            using var context = new PortfolioContext();
+            var dbInstruments = context.Set<Instrument>();
+
+            Instrument[] manualInstruments =
+            [
+                new() { ISIN = "LU1001748638", Name="JPM Europe Equity Absolute Alpha C (perf) (dist) - GBP (hedged)", Currency="GBP", Sedol="BH4GX47", Y_Symbol="0P00011M7T.L", InstrumentType="Fund", Distribution="acc" }
+            ];
+
+            foreach(Instrument manualInstrument in manualInstruments)
+            {
+                var existingInstrument = await context.Instrument
+                    .FirstOrDefaultAsync(i => i.ISIN == manualInstrument.ISIN);
+
+                if (existingInstrument == null)
+                {
+                    dbInstruments.Add(manualInstrument);
+                }
+                else
+                {
+                    existingInstrument.Name = manualInstrument.Name;
+                    existingInstrument.Currency = manualInstrument.Currency;
+                    existingInstrument.Sedol = manualInstrument.Sedol;
+                    existingInstrument.Y_Symbol = manualInstrument.Y_Symbol;
+                    existingInstrument.InstrumentType = manualInstrument.InstrumentType;
+                    existingInstrument.Distribution = manualInstrument.Distribution;
+                }
+            }
+
+            await context.SaveChangesAsync();
         }
     }
 }

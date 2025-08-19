@@ -20,18 +20,19 @@ public class Application
         //await _scraper.CleanInstruments();
         //await _scraper.ScrapeMarketCodes();
         //await _scraper.ScrapePortfolio();
+        //await _scraper.AddMissingInstruments();
         //await _scraper.ScrapeYSymbols();
         //await _scraper.ScrapeRisk();
         //await _scraper.ScrapePrices();
 
         //await _calc.SynthesiseMissingPrices();
-        await _calc.SetAdjustedReturns();
+        //await _calc.SetAdjustedReturns();
         //await _calc.SetMaxDrawdown();
-        //await _calc.SetMarketCorrelations();
-        //await _calc.GetCorrelations();
+        //await _calc.SetSharpeRatio();
+        await _calc.SetMarketCorrelations();
+        //await _calc.GetWatchlistCorrelations();
 
         //Console.WriteLine(await response.Content.ReadAsStringAsync());
-
 
         Console.ReadLine();
     }

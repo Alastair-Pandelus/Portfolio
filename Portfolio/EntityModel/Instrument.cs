@@ -159,4 +159,5 @@ public partial class Instrument
     public double? Correlation { get; set; }
     public bool Watchlist { get; set; } = false;
     public string Comment { get; set; } = string.Empty;
+    public double? SharpeRatio { get; set; }
 }
