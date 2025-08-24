@@ -14,7 +14,7 @@ namespace Portfolio.Scrape
         Task ScrapeInstruments();
         Task CleanInstruments();
         Task ScrapeMarketCodes();
-        Task ScrapePortfolio();
+        Task ScrapeHoldings();
         Task ScrapeYSymbols();
         Task ScrapeRisk();
         Task ScrapePrices();
@@ -329,7 +329,7 @@ namespace Portfolio.Scrape
             }
         }
 
-        public async Task ScrapePortfolio()
+        public async Task ScrapeHoldings()
         {
             using (var context = new PortfolioContext())
             {
@@ -361,7 +361,7 @@ namespace Portfolio.Scrape
                             .Include(i => i.Prices)
                             .FirstOrDefaultAsync(i => i.Id == instrumentId);
 
-                        if (await ScrapePortfolio(instrument))
+                        if (await ScrapeHoldings(instrument))
                         {
                             await context.SaveChangesAsync(cancellationToken);
                             Interlocked.Increment(ref count);
@@ -372,7 +372,7 @@ namespace Portfolio.Scrape
             }
         }
 
-        private async Task<bool> ScrapePortfolio(Instrument instrument)
+        private async Task<bool> ScrapeHoldings(Instrument instrument)
         {
             string marketCode = instrument.MarketCode;
 

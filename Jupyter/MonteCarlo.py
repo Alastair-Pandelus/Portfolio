@@ -5,12 +5,13 @@ from MonteCarloResult import MonteCarloResult
 from Portfolio import Portfolio
 
 class MonteCarlo:
-    def __init__(self, portfolio: Portfolio, min_return: float, max_return: float, min_allocation: float, max_allocation:float):
+    def __init__(self, portfolio: Portfolio, min_return: float, max_return: float, min_allocation: float, max_allocation:float, max_drawdown: float):
         self._portfolio = portfolio
         self._min_return = min_return
         self._max_return = max_return
         self._min_allocation = min_allocation
         self._max_allocation = max_allocation
+        self._max_drawdown = max_drawdown
 
     # Plot the Efficient Frontier - https://www.youtube.com/watch?v=mJTrQfzr0R4&ab_channel=Algovibes
     def run(self, iterations: int, risk_free_rate: float) -> List[MonteCarloResult]:
@@ -31,9 +32,28 @@ class MonteCarlo:
 
             sharpe_ratio = (portfolio_annual_return-risk_free_rate)/portfolio_annual_standard_deviation
 
-            results.append(MonteCarloResult(random_weights, portfolio_annual_return, portfolio_annual_standard_deviation, sharpe_ratio))
+            daily_price_weights = pd.Series(random_weights, self._portfolio.daily_price_history.columns)
+            daily_price_history_values = self._portfolio.daily_price_history.dropna()
+            daily_price_history = daily_price_history_values.dot(daily_price_weights)
+            daily_price_history.columns = ['Value']
+            max_drawdown = self.calc_max_drawdown(daily_price_history)
+
+            results.append(MonteCarloResult(random_weights, portfolio_annual_return, portfolio_annual_standard_deviation, sharpe_ratio, max_drawdown))
 
         return results
+    
+    def calc_max_drawdown(self, price_history: pd.array):
+        # Step 1: Get the cumulative maximum (peak so far)
+        peak = np.maximum.accumulate(price_history)
+
+        # Step 2: Calculate drawdown at each point (fraction below peak)
+        drawdown = (price_history - peak) / peak
+
+        # Step 3: Find the maximum drawdown (minimum drawdown value; it's negative)
+        max_drawdown = drawdown.min()
+
+        # -1 => -100% drawdown
+        return max_drawdown
     
     def best_result(self, results: List[MonteCarloResult]) -> MonteCarloResult:
         results = [result for result in results if result.annual_return >= self._min_return]
@@ -46,6 +66,11 @@ class MonteCarlo:
             print(f"Unable to find portfolio with max return <= {self._max_return}")
             return None
         
+        results = [result for result in results if result.max_drawdown <= self._max_drawdown]
+        if(len(results) == 0):
+            print(f"Unable to find portfolio with max drawdown <= {self._max_drawdown}")
+            return None
+        
         results = [result for result in results if all(val >= self._min_allocation for val in result.weights)]
         if(len(results) == 0):
             print(f"Unable to find portfolio with min allocation >= {self._min_allocation}")
@@ -56,7 +81,9 @@ class MonteCarlo:
             print(f"Unable to find portfolio with max allocation <= {self._max_allocation}")
             return None
             
-        best = max(results, key=lambda s: s.sharpe_ratio)
+        # drawdowns are negative, so seek the smallest one, max value
+        best = max(results, key=lambda s: s.annual_return)
+
         return best
     
     def create_random_weights(self) -> np.ndarray:

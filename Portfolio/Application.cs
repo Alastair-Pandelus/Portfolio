@@ -26,10 +26,10 @@ public class Application
         //await _scraper.ScrapePrices();
 
         //await _calc.SynthesiseMissingPrices();
-        //await _calc.SetAdjustedReturns();
+        await _calc.SetAdjustedReturns();
         //await _calc.SetMaxDrawdown();
         //await _calc.SetSharpeRatio();
-        await _calc.SetMarketCorrelations();
+        //await _calc.SetMarketCorrelations();
         //await _calc.GetWatchlistCorrelations();
 
         //Console.WriteLine(await response.Content.ReadAsStringAsync());

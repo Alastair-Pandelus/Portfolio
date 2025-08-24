@@ -8,12 +8,12 @@ from DataframeTypes import fund_monthly_returns_type_schema, fund_adjusted_retur
 from FundSelection import FundSelection
 
 class Portfolio:
-    def __init__(self, fund_selection: List[FundSelection], benchmark: List[FundSelection], price_weeks: int):
+    def __init__(self, fund_selection: List[FundSelection], benchmark: List[FundSelection], price_years: int):
         self._db_query = DbQuery()
 
         self._fund_selection = fund_selection
 
-        monthly_returns = self.get_monthly_returns(fund_selection, price_weeks)
+        monthly_returns = self.get_monthly_returns(fund_selection, price_years)
         monthly_returns = monthly_returns.dropna()
         self._monthly_returns = monthly_returns
 
@@ -23,7 +23,10 @@ class Portfolio:
         self._names_csv = ', '.join([f"'{f.name}'" for f in self.fund_selection])
 
         self._benchmark = benchmark
-        self._benchmark_monthly_returns = self.get_monthly_returns(benchmark, price_weeks)
+        self._benchmark_monthly_returns = self.get_monthly_returns(benchmark, price_years)
+
+        #min_date, max_date = self.get_min_max_dates(price_years)
+        self._daily_price_history = self.get_daily_price_history(price_years)
         
     @property
     def fund_selection(self):
@@ -32,6 +35,10 @@ class Portfolio:
     @property
     def monthly_returns(self):
         return self._monthly_returns
+    
+    @property
+    def daily_price_history(self):
+        return self._daily_price_history
     
     @property
     def correlation_matrix(self):
@@ -56,18 +63,22 @@ class Portfolio:
             
         return -1
     
-    def get_min_max_dates(self, weeks: int):
-        minDate, maxDate = self._db_query.get_min_max_dates(self._names_csv)
-        minDate = maxDate - timedelta(weeks=weeks)
+    # def get_min_max_dates(self, years: int):
+    #     minDate, maxDate = self._db_query.get_min_max_dates(self._names_csv)
+    #     minDate = maxDate - timedelta(weeks=years*52.25)
 
-        return minDate, maxDate
+        # return minDate, maxDate
     
-    def get_monthly_returns(self, funds: List[FundSelection], weeks: int):
+    def get_monthly_returns(self, funds: List[FundSelection], years: int):
         monthly_returns = []
 
         for fund in funds:
-            fund_monthly_returns = self._db_query.get_monthly_returns(fund.name, weeks)
+            fund_monthly_returns = self._db_query.get_monthly_returns(fund.name, years)
             fund_monthly_returns_type_schema.validate(fund_monthly_returns)
+            num_rows = fund_monthly_returns.shape[0]
+            if num_rows < int(years * 12):
+                raise Exception(f'fund {fund.name} only has {num_rows} rows, expecting {years*12} months for {years} years')
+
             fund_monthly_returns = fund_monthly_returns.rename(columns={'Value': fund.name})
 
             monthly_returns.append(fund_monthly_returns)
@@ -78,11 +89,11 @@ class Portfolio:
     
     from functools import reduce
 
-    def get_daily_price_history(self, min_date, max_date):
+    def get_daily_price_history(self, years):
         adjusted_returns = []
 
         for fund in self._fund_selection:
-            fund_adjusted_returns = self._db_query.get_daily_log_adjusted_return(fund.name, min_date, max_date)
+            fund_adjusted_returns = self._db_query.get_daily_log_adjusted_return(fund.name, years)
             fund_adjusted_returns_type_schema.validate(fund_adjusted_returns)
             fund_adjusted_returns = fund_adjusted_returns.rename(columns={'LogValue': fund.name})
 
@@ -96,11 +107,11 @@ class Portfolio:
         
         return df_values
     
-    def get_benchmark_daily_price_history(self, min_date, max_date):
+    def get_benchmark_daily_price_history(self, years):
         adjusted_returns = []
 
         for fund in self._benchmark:
-            fund_adjusted_returns = self._db_query.get_daily_log_adjusted_return(fund.name, min_date, max_date)
+            fund_adjusted_returns = self._db_query.get_daily_log_adjusted_return(fund.name, years)
             fund_adjusted_returns_type_schema.validate(fund_adjusted_returns)
             fund_adjusted_returns = fund_adjusted_returns.rename(columns={'LogValue': fund.name})
 

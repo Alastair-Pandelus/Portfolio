@@ -1,12 +1,13 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Portfolio.EntityModel;
 using MathNet.Numerics.Statistics;
+using Microsoft.Identity.Client;
 
 namespace Portfolio.Calculation
 {
     public interface ICalc
     {
-        public Task SynthesiseMissingPrices();
+        //public Task SynthesiseMissingPrices();
         public Task SetMaxDrawdown();
         public Task SetMarketCorrelations();
         public Task SetProxyInstruments();
@@ -17,68 +18,72 @@ namespace Portfolio.Calculation
 
     public class Calc : ICalc
     {
-        public async Task SynthesiseMissingPrices()
-        {
-            using var context = new PortfolioContext();
+        //public async Task SynthesiseMissingPrices()
+        //{
+        //    using var context = new PortfolioContext();
 
-            var dateRange = await context.Set<EntityModel.PriceDate>().FromSqlRaw
-                (@"select distinct([Date]) from dbo.Price order by [Date] desc").ToListAsync();
+        //    var dateRange = await context.Set<EntityModel.PriceDate>().FromSqlRaw
+        //        (@"select distinct([Date]) from dbo.Price order by [Date] desc").ToListAsync();
 
-            var instruments = await context.Set<Instrument>()
-                .ToListAsync();
+        //    var instruments = await context.Set<Instrument>()
+        //        .ToListAsync();
 
-            int i = 0;
-            foreach(var instrument in instruments)
-            {
-                int count = 0;
+        //    int i = 0;
+        //    foreach(var instrument in instruments)
+        //    {
+        //        int count = 0;
 
-                var instrumentPrices = await context.Set<Price>()
-                    .Where(p => p.InstrumentId == instrument.Id)
-                    .ToListAsync();
+        //        var instrumentPrices = await context.Set<Price>()
+        //            .Where(p => p.InstrumentId == instrument.Id)
+        //            .ToListAsync();
 
-                if(instrumentPrices.Count < 2)
-                {
-                    Console.WriteLine($"[{++i} of {instruments.Count}] - Instrument {instrument.Name} has less than 2 prices, skipping.");
-                    continue;
-                }
+        //        if(instrumentPrices.Count < 2)
+        //        {
+        //            Console.WriteLine($"[{++i} of {instruments.Count}] - Instrument {instrument.Name} has less than 2 prices, skipping.");
+        //            continue;
+        //        }
 
-                var earliestPriceDate = instrumentPrices
-                    .Select(p => p.Date)
-                    .Min();
+        //        var earliestPriceDate = instrumentPrices
+        //            .Select(p => p.Date)
+        //            .Min();
 
-                var latestPriceDate = instrumentPrices
-                    .Select(p => p.Date)
-                    .Max();
+        //        var latestPriceDate = instrumentPrices
+        //            .Select(p => p.Date)
+        //            .Max();
 
-                var instrumentPriceDates = instrumentPrices
-                    .Select(p => p.Date)
-                    .ToList();
+        //        var instrumentPriceDates = instrumentPrices
+        //            .Select(p => p.Date)
+        //            .ToList();
 
-                var missingDates = dateRange.Select(d => d.Value)
-                    .Where(d => d >= earliestPriceDate && d <= latestPriceDate && !instrumentPriceDates.Contains(d))
-                    .ToList();
+        //        var missingDates = dateRange.Select(d => d.Value)
+        //            .Where(d => d >= earliestPriceDate && d <= latestPriceDate && !instrumentPriceDates.Contains(d))
+        //            .ToList();
 
-                foreach(var missingDate in missingDates)
-                {
-                    var nearestPrice = instrumentPrices
-                        .Where(p => p.Date < missingDate)
-                        .OrderByDescending(p => p.Date)
-                        .FirstOrDefault();
+        //        foreach(var missingDate in missingDates)
+        //        {
+        //            var nearestPrice = instrumentPrices
+        //                .Where(p => p.Date < missingDate)
+        //                .OrderByDescending(p => p.Date)
+        //                .FirstOrDefault();
 
-                    var newPrice = new Price
-                    {
-                        InstrumentId = instrument.Id,
-                        Date = missingDate,
-                        Value = nearestPrice.Value  
-                    };
-                    context.Set<Price>().Add(newPrice);
-                    count++;
-                }
+        //            var newPrice = new Price
+        //            {
+        //                InstrumentId = instrument.Id,
+        //                Date = missingDate,
+        //                Value = nearestPrice.Value  
+        //            };
+        //            context.Set<Price>().Add(newPrice);
+        //            count++;
+        //        }
 
-                context.SaveChanges();
-                Console.WriteLine($"[{++i} of {instruments.Count}] - Synthesised {count} missing prices for instrument: {instrument.Name}");
-            }
-        }
+        //        if (count > 0)
+        //        {
+        //            context.SaveChanges();
+        //            Console.WriteLine($"[{i} of {instruments.Count}] - Synthesised {count} missing prices for instrument: {instrument.Name}");
+        //        }
+        //        i++;
+        //    }
+        //}
 
         public async Task SetMarketCorrelations()
         {
@@ -152,11 +157,13 @@ namespace Portfolio.Calculation
             var dbInstruments = context.Set<Instrument>();
             var dbPrices = context.Set<Price>();
 
+            //not exists(select* from dbo.AdjustedReturn A where A.InstrumentId = i.Id)
+	        //where exists(select * from dbo.Price P where P.InstrumentId = i.Id) and
+
             var instruments = await dbInstruments.FromSqlRaw
                 (
                     @"select * from dbo.Instrument i
-	                    where exists(select * from dbo.Price P where P.InstrumentId = i.Id) and
-                        not exists (select * from dbo.AdjustedReturn A where A.InstrumentId = i.Id)"
+                        where i.Id = 7127"
                )
                .Include(i => i.Proxies)
                .ToListAsync();
@@ -209,11 +216,12 @@ namespace Portfolio.Calculation
                 var previousPrice = prices[instrument.Id][i + 1];
                 currentDate = currentPrice.Date;
 
+                // Use natural log (LN in Excel)
                 var adjustedReturn = new AdjustedReturn
                 {
                     InstrumentId = instrument.Id,
                     Date = currentPrice.Date,
-                    LogValue = Math.Log(currentPrice.Value / previousPrice.Value)
+                    LogValue = Math.Log(1+((currentPrice.Value - previousPrice.Value)/previousPrice.Value))
                 };
 
                 var existingReturn = adjustedReturns.FirstOrDefault(ar => ar.Date == adjustedReturn.Date);

@@ -10,15 +10,14 @@ from MonteCarloResult import MonteCarloResult
 from Portfolio import Portfolio
 
 FUND_COUNT = 4
-MIN_DATE = datetime(2020, 1, 1)
-MAX_DATE = datetime(2024, 1, 1)
+PRICES_YEARS = 10
 
 class DummyDbQuery:
-    def get_min_max_dates(self, names_csv):
-        return MIN_DATE, MAX_DATE
-    
-    def get_monthly_returns(self, name, weeks):
-        dates = pd.date_range(start=MIN_DATE, end=MAX_DATE, freq='ME')
+    def get_monthly_returns(self, name, years):
+        end_date = pd.Timestamp.today().normalize()
+        start_date = end_date - pd.DateOffset(years=PRICES_YEARS)
+        dates = pd.date_range(start=start_date, end=end_date, freq='ME')
+
         hash_value = (hash(name) % 1000) / 1000
 
         returns = []
@@ -30,13 +29,16 @@ class DummyDbQuery:
         
         return df
     
-    def get_daily_log_adjusted_return(self, name, min_date, max_date):
-        dates = pd.date_range(min_date, max_date, freq='ME')
+    def get_daily_log_adjusted_return(self, name, years):
+        end_date = pd.Timestamp.today().normalize()
+        start_date = end_date - pd.DateOffset(years=PRICES_YEARS)
+        dates = pd.date_range(start=start_date, end=end_date, freq='ME')
+
         hash_value = (hash(name) % 1000) / 1000
 
         adjusted_returns = []
         for i in range(len(dates)):
-            value = 0.001+(0.0001*i) if i % 2 else -0.001-(i*0.0001)
+            value = 0.002+(0.0002*i) if i % 2 else -0.001-(i*0.0001)
             adjusted_returns.append(value * hash_value)
 
         df = pd.DataFrame({'Date': dates, 'LogValue': adjusted_returns})
@@ -52,13 +54,13 @@ class TestPortfolio(unittest.TestCase):
 
         self.funds = fund_selections
         self.benchmark = [FundSelection('Benchmark', 1.0)]
-        self.price_weeks = 52
+        self.years = PRICES_YEARS
 
         patcher = patch('Portfolio.DbQuery', DummyDbQuery)
         self.addCleanup(patcher.stop)
         self.mock_db = patcher.start()
 
-        self.portfolio = Portfolio(self.funds, self.benchmark, self.price_weeks)
+        self.portfolio = Portfolio(self.funds, self.benchmark, self.years)
         self.monte_carlo = MonteCarlo(self.portfolio, min_return=0.0, max_return=999.9, min_allocation=0.0, max_allocation=1.0)
 
     def test_fund_selection_property(self):
@@ -85,11 +87,11 @@ class TestPortfolio(unittest.TestCase):
         weight = self.portfolio.get_weight('NonExistent')
         self.assertEqual(weight, -1)
 
-    def test_get_min_max_dates(self):
-        min_date, max_date = self.portfolio.get_min_max_dates(10)
-        self.assertTrue(isinstance(min_date, datetime))
-        self.assertTrue(isinstance(max_date, datetime))
-        self.assertEqual((max_date - min_date).days, 7*10)
+    # def test_get_min_max_dates(self):
+    #     min_date, max_date = self.portfolio.get_min_max_dates(10)
+    #     self.assertTrue(isinstance(min_date, datetime))
+    #     self.assertTrue(isinstance(max_date, datetime))
+    #     self.assertEqual((max_date - min_date).days, 7*10)
 
     def test_get_monthly_returns(self):
         df = self.portfolio.get_monthly_returns(self.funds, 10)
@@ -100,9 +102,8 @@ class TestPortfolio(unittest.TestCase):
     def test_covariance_matrix_created(self):
         matrix = self.portfolio.covariance_matrix
 
-
     def test_get_daily_price_history(self):
-        df = self.portfolio.get_daily_price_history(MIN_DATE, MAX_DATE)
+        df = self.portfolio.get_daily_price_history(6)
         self.assertIsInstance(df, pd.DataFrame)
         self.assertEqual(df.index.name, 'Date')
         self.assertEqual(len(list(df.columns)),FUND_COUNT)
