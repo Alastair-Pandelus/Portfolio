@@ -32,9 +32,26 @@ class MonteCarlo:
 
             sharpe_ratio = (portfolio_annual_return-risk_free_rate)/portfolio_annual_standard_deviation
 
-            daily_price_weights = pd.Series(random_weights, self._portfolio.daily_price_history.columns)
             daily_price_history_values = self._portfolio.daily_price_history.dropna()
-            daily_price_history = daily_price_history_values.dot(daily_price_weights)
+            years = daily_price_history_values.index.year.unique().sort_values()
+            start_year_df = daily_price_history_values[daily_price_history_values.index.year == years[0]]
+            next_years_df = {year: daily_price_history_values[daily_price_history_values.index.year == year] for year in years[1:]}
+
+            balanced_df = start_year_df.copy()
+
+            # annual rebalance 
+            for year in next_years_df:
+                df_year = next_years_df[year]
+                year_total_starting_value = df_year.iloc[0]
+                weighted_growth = np.dot((df_year.iloc[0]-start_year_df.iloc[0])/start_year_df.iloc[0],random_weights)
+                balancing_weights = start_year_df.iloc[0]*(1+weighted_growth)/df_year.iloc[0]
+                df_year_balanced = df_year * balancing_weights
+                balanced_df = pd.concat([balanced_df, df_year_balanced])
+                weighted_growth += 0.0
+
+            daily_price_weights = pd.Series(random_weights, balanced_df.columns)
+            daily_price_history = balanced_df.dot(daily_price_weights)
+
             daily_price_history.columns = ['Value']
             max_drawdown = self.calc_max_drawdown(daily_price_history)
 
@@ -66,7 +83,8 @@ class MonteCarlo:
             print(f"Unable to find portfolio with max return <= {self._max_return}")
             return None
         
-        results = [result for result in results if result.max_drawdown <= self._max_drawdown]
+        # drawdowns are negative, so seek the values higher than the threshold
+        results = [result for result in results if result.max_drawdown >= self._max_drawdown]
         if(len(results) == 0):
             print(f"Unable to find portfolio with max drawdown <= {self._max_drawdown}")
             return None

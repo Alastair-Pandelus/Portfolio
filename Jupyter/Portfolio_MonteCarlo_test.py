@@ -34,18 +34,19 @@ class DummyDbQuery:
         start_date = end_date - pd.DateOffset(years=PRICES_YEARS)
         dates = pd.date_range(start=start_date, end=end_date, freq='ME')
 
-        hash_value = (hash(name) % 1000) / 1000
+        psuedo_random = sum(ord(c) for c in name)
 
         adjusted_returns = []
         for i in range(len(dates)):
-            value = 0.002+(0.0002*i) if i % 2 else -0.001-(i*0.0001)
-            adjusted_returns.append(value * hash_value)
+            value = 0.2+(0.02*i) if i % 2 else -0.1-(i*0.01)
+            adjusted_returns.append(value * (psuedo_random % 1000) / 1000)
+            psuedo_random = (psuedo_random * 32719 + 3) % 32749
 
         df = pd.DataFrame({'Date': dates, 'LogValue': adjusted_returns})
         df.set_index('Date', inplace=True)
 
         return df
-
+    
 class TestPortfolio(unittest.TestCase):
     def setUp(self):
         fund_selections = []
@@ -61,7 +62,7 @@ class TestPortfolio(unittest.TestCase):
         self.mock_db = patcher.start()
 
         self.portfolio = Portfolio(self.funds, self.benchmark, self.years)
-        self.monte_carlo = MonteCarlo(self.portfolio, min_return=0.0, max_return=999.9, min_allocation=0.0, max_allocation=1.0)
+        self.monte_carlo = MonteCarlo(self.portfolio, min_return=0.0, max_return=999.9, min_allocation=0.0, max_allocation=1.0, max_drawdown=-0.2)
 
     def test_fund_selection_property(self):
         self.assertEqual(self.portfolio.fund_selection, self.funds)
@@ -120,9 +121,12 @@ class TestPortfolio(unittest.TestCase):
         self.assertEqual(result, None)
 
     def test_monte_carlo_returns_results(self):
+        self.portfolio.fund_selection[0].weight = 0.1
+        self.portfolio.fund_selection[1].weight = 0.2
+        self.portfolio.fund_selection[2].weight = 0.3
+        self.portfolio.fund_selection[3].weight = 0.4
         result = self.monte_carlo.run(iterations=10, risk_free_rate=0.04)
-        self.assertIsInstance(result, MonteCarloResult)
-
+        self.assertIsInstance(result, list)
 
 if __name__ == '__main__':
     unittest.main()

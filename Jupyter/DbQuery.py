@@ -56,6 +56,7 @@ class DbQuery:
         
         with self._db_engine.connect() as connection:
             df = pd.read_sql_query(query, connection)
+            df['Date'] = pd.to_datetime(df['Date'])
         
         df.set_index('Date', inplace=True)
         
@@ -77,6 +78,7 @@ class DbQuery:
         
         with self._db_engine.connect() as connection:
             df = pd.read_sql_query(query, connection)
+            df['Date'] = pd.to_datetime(df['Date'])
         
         df.set_index('Date', inplace=True)
 

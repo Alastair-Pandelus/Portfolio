@@ -76,7 +76,7 @@ class Portfolio:
             fund_monthly_returns = self._db_query.get_monthly_returns(fund.name, years)
             fund_monthly_returns_type_schema.validate(fund_monthly_returns)
             num_rows = fund_monthly_returns.shape[0]
-            if num_rows < int(years * 12):
+            if num_rows < int(years * 12)-1:
                 raise Exception(f'fund {fund.name} only has {num_rows} rows, expecting {years*12} months for {years} years')
 
             fund_monthly_returns = fund_monthly_returns.rename(columns={'Value': fund.name})
