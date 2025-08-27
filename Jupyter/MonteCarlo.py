@@ -19,6 +19,11 @@ class MonteCarlo:
 
         results = []
 
+        daily_price_history_values = self._portfolio.daily_price_history.dropna()
+        years = daily_price_history_values.index.year.unique().sort_values()
+        start_year_df = daily_price_history_values[daily_price_history_values.index.year == years[0]]
+        next_years_df = {year: daily_price_history_values[daily_price_history_values.index.year == year] for year in years[1:]}
+
         for _ in range(iterations):
             random_weights = self.create_random_weights()
 
@@ -32,22 +37,8 @@ class MonteCarlo:
 
             sharpe_ratio = (portfolio_annual_return-risk_free_rate)/portfolio_annual_standard_deviation
 
-            daily_price_history_values = self._portfolio.daily_price_history.dropna()
-            years = daily_price_history_values.index.year.unique().sort_values()
-            start_year_df = daily_price_history_values[daily_price_history_values.index.year == years[0]]
-            next_years_df = {year: daily_price_history_values[daily_price_history_values.index.year == year] for year in years[1:]}
-
-            balanced_df = start_year_df.copy()
-
             # annual rebalance 
-            for year in next_years_df:
-                df_year = next_years_df[year]
-                year_total_starting_value = df_year.iloc[0]
-                weighted_growth = np.dot((df_year.iloc[0]-start_year_df.iloc[0])/start_year_df.iloc[0],random_weights)
-                balancing_weights = start_year_df.iloc[0]*(1+weighted_growth)/df_year.iloc[0]
-                df_year_balanced = df_year * balancing_weights
-                balanced_df = pd.concat([balanced_df, df_year_balanced])
-                weighted_growth += 0.0
+            balanced_df = self.balanced_backtest(start_year_df, next_years_df, random_weights)
 
             daily_price_weights = pd.Series(random_weights, balanced_df.columns)
             daily_price_history = balanced_df.dot(daily_price_weights)
@@ -58,6 +49,31 @@ class MonteCarlo:
             results.append(MonteCarloResult(random_weights, portfolio_annual_return, portfolio_annual_standard_deviation, sharpe_ratio, max_drawdown))
 
         return results
+    
+    def balanced_backtest_portfolio(self, portfolio, weights):
+        daily_price_history_values = portfolio.daily_price_history.dropna()
+        years = daily_price_history_values.index.year.unique().sort_values()
+        start_year_df = daily_price_history_values[daily_price_history_values.index.year == years[0]]
+        next_years_df = {year: daily_price_history_values[daily_price_history_values.index.year == year] for year in years[1:]}
+
+        balanced_df = self.balanced_backtest(start_year_df, next_years_df, weights)
+
+        return balanced_df
+        
+
+    def balanced_backtest(self, start_year_df, next_years_df, weights):
+        # initial year - no rebalancing
+        balanced_df = start_year_df.copy()
+
+        # subsequent years - rebalance to target weights at start of each year
+        for year in next_years_df:
+            df_year = next_years_df[year]
+            weighted_growth = np.dot((df_year.iloc[0]-start_year_df.iloc[0])/start_year_df.iloc[0],weights)
+            balancing_weights = start_year_df.iloc[0]*(1+weighted_growth)/df_year.iloc[0]
+            df_year_balanced = df_year * balancing_weights
+            balanced_df = pd.concat([balanced_df, df_year_balanced])
+
+        return balanced_df
     
     def calc_max_drawdown(self, price_history: pd.array):
         # Step 1: Get the cumulative maximum (peak so far)
