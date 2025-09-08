@@ -62,7 +62,7 @@ class DbQuery:
         
         return df    
     
-    def get_daily_log_adjusted_return(self, fund_name, years):
+    def get_daily_log_adjusted_return(self, fund_name, years, proxy_funds: list = None):
         query = f"""
         select 
             AR.Date, 

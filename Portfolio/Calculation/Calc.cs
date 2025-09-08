@@ -100,11 +100,13 @@ namespace Portfolio.Calculation
                                     count(distinct(YEAR([date])*12+MONTH([date]))) as Months, 
                                     max(YEAR([date])*12+MONTH([date])) as MaxMonth
                                 from Price
-                                    where Symbol = 'ACWI' or Correlation is null
+                                    where Correlation is null
                                 group by InstrumentId
                         ) InstrumentMonths
                         where InstrumentMonths.Months > 36 and MaxMonth = YEAR(GETDATE())*12+MONTH(GETDATE())
-                    )"
+                    )
+                    union 
+                    select * from Instrument where Symbol = 'ACWI'"
                )
                //.Where(i => i.Symbol == "ACWI" || i.ISIN== "GB00B0CNH056")
                .ToListAsync();
