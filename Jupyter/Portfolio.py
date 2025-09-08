@@ -1,6 +1,8 @@
+from collections import OrderedDict
 from datetime import timedelta
 from typing import List
 from colorhash import ColorHash
+from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
 from functools import reduce
@@ -9,11 +11,24 @@ from DataframeTypes import fund_monthly_returns_type_schema, fund_adjusted_retur
 from FundSelection import FundSelection
 import scipy.optimize as sco
 from matplotlib import pyplot as plt
-from pyfolio import utils, plotting
+from matplotlib.lines import Line2D
+from pyfolio import utils, plotting, timeseries
 import empyrical as ep
 import matplotlib.gridspec as gridspec
+import seaborn as sns
 
 TRADING_DAYS_IN_YEAR = 252
+APPROX_BDAYS_PER_MONTH = 21
+PORTFOLIO_COLOUR = "red"
+
+STAT_FUNCS_PCT = [
+    "Annual return",
+    "Cumulative returns",
+    "Annual volatility",
+    "Max drawdown",
+    "Daily value at risk",
+    "Daily turnover",
+]
 
 class Portfolio:
     def __init__(self, fund_selection: List[FundSelection], benchmark: List[FundSelection], price_years: int):
@@ -229,25 +244,25 @@ class Portfolio:
         # make it deterministic
         np.random.seed(42)
 
-        abridged_weights = np.random.random(size=(iterations, len(self.fund_selection)))
-        abridged_weights /= np.sum(abridged_weights, axis=1)[:, np.newaxis]
+        weights = np.random.random(size=(iterations, len(self.fund_selection)))
+        weights /= np.sum(weights, axis=1)[:, np.newaxis]
 
-        abridged_avg_returns = self._adjusted_returns.mean() * TRADING_DAYS_IN_YEAR
-        abridged_cov_mat = self._adjusted_returns.cov() * TRADING_DAYS_IN_YEAR
+        avg_returns = self._adjusted_returns.mean() * TRADING_DAYS_IN_YEAR
+        cov_mat = self._adjusted_returns.cov() * TRADING_DAYS_IN_YEAR
 
-        abridged_portf_rtns = np.dot(abridged_weights, abridged_avg_returns)
-        abridged_portf_vol = []
+        portf_rtns = np.dot(weights, avg_returns)
+        portf_vol = []
 
         # run Monte Carlo
-        for i in range(0, len(abridged_weights)):
-            abridged_portf_vol.append(np.sqrt(np.dot(abridged_weights[i].T, np.dot(abridged_cov_mat, abridged_weights[i]))))
+        for i in range(0, len(weights)):
+            portf_vol.append(np.sqrt(np.dot(weights[i].T, np.dot(cov_mat, weights[i]))))
 
-        abridged_portf_vol = np.array(abridged_portf_vol)
-        abridged_portf_sharpe_ratio = (abridged_portf_rtns - risk_free_rate) / abridged_portf_vol
+        portf_vol = np.array(portf_vol)
+        portf_sharpe_ratio = (portf_rtns - risk_free_rate) / portf_vol
 
-        abridged_portf_results_df = pd.DataFrame({'returns': abridged_portf_rtns,
-                                        'volatility': abridged_portf_vol,
-                                        'sharpe_ratio': abridged_portf_sharpe_ratio})
+        portf_results_df = pd.DataFrame({'returns': portf_rtns,
+                                        'volatility': portf_vol,
+                                        'sharpe_ratio': portf_sharpe_ratio})
         
         # Calculate the efficient frontier to 'efficient_portfolios' variable using scipy.optimize
         rtns_range = np.linspace(start=0.07, stop=0.13, num=200)
@@ -255,121 +270,89 @@ class Portfolio:
                         'fun': lambda x: np.sum(x) - 1})
 
         # Abridged Portfolio - calculate max Sharpe Ratio and associated weights
-        abridged_efficient_portfolios = self.__get_efficient_frontier(abridged_avg_returns, abridged_cov_mat, rtns_range)
-        abridged_vols_range = [x['fun'] for x in abridged_efficient_portfolios]
-        abridged_n_assets = len(abridged_avg_returns)
-        abridged_args = (abridged_avg_returns, abridged_cov_mat, risk_free_rate)
-        abridged_bounds = tuple((0,1) for asset in range(abridged_n_assets))
-        abridged_initial_guess = abridged_n_assets * [1. / abridged_n_assets]
-        abridged_max_sharpe_portf = sco.minimize(self.__neg_sharpe_ratio,
-                                        x0=abridged_initial_guess,
-                                        args=abridged_args,
+        efficient_portfolios = self.__get_efficient_frontier(avg_returns, cov_mat, rtns_range)
+        vols_range = [x['fun'] for x in efficient_portfolios]
+        n_assets = len(avg_returns)
+        args = (avg_returns, cov_mat, risk_free_rate)
+        bounds = tuple((0,1) for asset in range(n_assets))
+        initial_guess = n_assets * [1. / n_assets]
+        max_sharpe_portf = sco.minimize(self.__neg_sharpe_ratio,
+                                        x0=initial_guess,
+                                        args=args,
                                         method='SLSQP',
-                                        bounds=abridged_bounds,
+                                        bounds=bounds,
                                         constraints=constraints)
-        abridged_max_sharpe_portf_weights = abridged_max_sharpe_portf['x']
-        abridged_max_sharpe_portf = {
-            'AverageReturns': abridged_avg_returns,
-            'CovarianceMatrix': abridged_cov_mat,
-            'VolsRange': abridged_vols_range,
+        max_sharpe_portf_weights = max_sharpe_portf['x']
+        max_sharpe_portf = {
+            'AverageReturns': avg_returns,
+            'CovarianceMatrix': cov_mat,
+            'VolsRange': vols_range,
             'ReturnsRange': rtns_range,
-            'Results': abridged_portf_results_df,
-            'Return': self.__get_portf_rtn(abridged_max_sharpe_portf_weights, abridged_avg_returns),
-            'Volatility': self.__get_portf_vol(abridged_max_sharpe_portf_weights, abridged_avg_returns, abridged_cov_mat),
-            'Sharpe Ratio': -abridged_max_sharpe_portf['fun'],
-            'Weights': abridged_max_sharpe_portf_weights
+            'Results': portf_results_df,
+            'Return': self.__get_portf_rtn(max_sharpe_portf_weights, avg_returns),
+            'Volatility': self.__get_portf_vol(max_sharpe_portf_weights, avg_returns, cov_mat),
+            'Sharpe Ratio': -max_sharpe_portf['fun'],
+            'Weights': max_sharpe_portf_weights
         }
 
-        # update weights in abridged_fund_selection, this also updates the proxy funds in full_fund_selection
+        # update weights in fund_selection, this also updates the proxy funds in fund_selection
         for i in range(len(self._fund_selection)):
-            self._fund_selection[i].weight = abridged_max_sharpe_portf['Weights'][i]        
+            self._fund_selection[i].weight = max_sharpe_portf['Weights'][i]        
         
-        return abridged_max_sharpe_portf
+        return max_sharpe_portf
     
     #Plot the calculated Efficient Frontier, together with the simulated portfolios
 
-    def plot_efficient_frontier(self, full_max_sharpe_portf):
-        fig, ax = plt.subplots()
-        full_max_sharpe_portf['Results'].plot(kind='scatter', x='volatility',
-                            y='returns', c='sharpe_ratio',
-                            cmap='PuBu', edgecolors='white',
-                            figsize=(9, 6),
-                            alpha=0.1,
-                            ax=ax)
+    def plot_efficient_frontier(self, max_sharpe_portf, ax=None):
+        if ax == None:
+            ax = plt.subplots()
+
+        max_sharpe_portf['Results'].plot(kind='scatter', x='volatility',
+                             y='returns', c='sharpe_ratio',
+                             cmap='PuBu', edgecolors='white',
+                             #figsize=(9, 6),
+                             alpha=0.1,
+                             ax=ax)
+
 
         # draw the efficient frontier lines
-        ax.plot(full_max_sharpe_portf['VolsRange'], full_max_sharpe_portf['ReturnsRange'], 'b--', linewidth=2, alpha=0.3)
+        ax.plot(max_sharpe_portf['VolsRange'], max_sharpe_portf['ReturnsRange'], 'b--', linewidth=2, alpha=0.3)
 
         # Add full individual funds    
         for asset_index in range(len(self.fund_selection)):
             fund = self.fund_selection[asset_index]
-            ax.scatter(x=np.sqrt(full_max_sharpe_portf['CovarianceMatrix'].iloc[asset_index, asset_index]),
-                    y=full_max_sharpe_portf['AverageReturns'][asset_index],
+            ax.scatter(x=np.sqrt(max_sharpe_portf['CovarianceMatrix'].iloc[asset_index, asset_index]),
+                    y=max_sharpe_portf['AverageReturns'][asset_index],
                     marker='*',
                     s=200,
                     alpha=1,
                     color=ColorHash(fund.name).hex,
-                    label=fund.name[:30]+'..')
+                    label=fund.short_name())
 
-        ax.scatter(x=full_max_sharpe_portf['Volatility'],   
-                y=full_max_sharpe_portf['Return'],
+        ax.scatter(x=max_sharpe_portf['Volatility'],   
+                y=max_sharpe_portf['Return'],
                 marker='*',
                 s=240,
                 alpha=1,
-                color='yellowgreen', edgecolors='black', linewidths=1,
+                color=PORTFOLIO_COLOUR, edgecolors='black', linewidths=1,
                 label='Max Sharpe Ratio (Full)')    
 
-        ax.legend()
+        ax.legend(fontsize='small')
 
         ax.set(xlabel='Volatility',ylabel='Expected Returns', title='Efficient Frontier')
 
-    def plot_backtest_portfolio(self, full_max_sharpe_portf):
-        import plotly.express as plot
-
-        full_weights = full_max_sharpe_portf['Weights']
-        graph_prices = self.daily_price_history.copy()
-
-        names_with_weights = []
-        weight_colours=[]
-
-        for i in range(len(self.fund_selection)):
-            fund = self.fund_selection[i]
-            names_with_weights.append(f"{round(full_weights[i],4)*100.0:.2f}% - {fund.name[:30]+'..'}")
-            colour = ColorHash(fund.name, lightness=[0.28]).hex
-            weight_colours.append(colour)
-
-        graph_prices.columns = names_with_weights
-
-        # Add total to graph
-        title = f'Highest Sharpe Ratio ({full_max_sharpe_portf["Sharpe Ratio"]:.2f}) for given return portfolio {full_max_sharpe_portf["Return"]*100.0:.2f}% return'
-        total_prices = self.daily_price_history.dot(full_max_sharpe_portf['Weights'])
-        graph_prices['Highest Sharpe Ratio for given return portfolio'] = total_prices
-        names_with_weights.append(title)
-        weight_colours.append("yellow")
-
-        # Add benchmark to graph
-        graph_prices['Benchmark (4PHUXACHE)'] = self.get_benchmark_daily_price_history()
-        names_with_weights.append(f'Benchmark (4PHUXACHE)')
-        weight_colours.append("orange")
-
-        fig = plot.line(graph_prices, x=graph_prices.index, y=graph_prices.columns, 
-                        title=title,
-                        labels={'value': 'Price', 'variable': 'Instrument'},
-                        template='plotly_dark',
-                        color_discrete_sequence=weight_colours
-                        )
-        fig.update_layout(autosize=False, width=1200, height=800 )
-        fig.show()
-
-    def plot_returns_tear_sheet(self, full_max_sharpe_portf):
-        portfolio_returns = self.adjusted_returns.dot(full_max_sharpe_portf['Weights'])
+    def plot_returns_tear_sheet(self, max_sharpe_portf):
+        portfolio_returns = self.adjusted_returns.dot(max_sharpe_portf['Weights'])
         benchmark_weights = [f.weight for f in self.benchmark]
         benchmark_returns = self.benchmark_adjusted_returns.dot(benchmark_weights)
 
-        return self.__create_returns_tear_sheet(portfolio_returns, benchmark_rets=benchmark_returns)
+        return self.__create_returns_tear_sheet(portfolio_returns, max_sharpe_portf=max_sharpe_portf, benchmark_rets=benchmark_returns)
 
     # https://github.com/quantopian/pyfolio/blob/master/pyfolio/tears.py#L409
-    def __create_returns_tear_sheet(self, returns, positions=None,
+    def __create_returns_tear_sheet(self, 
+                                    returns, 
+                                    max_sharpe_portf,
+                                    positions=None,
                                     transactions=None,
                                     live_start_date=None,
                                     cone_std=(1.0, 1.5, 2.0),
@@ -382,15 +365,17 @@ class Portfolio:
         if benchmark_rets is not None:
             returns = utils.clip_returns_to_benchmark(returns, benchmark_rets)
 
-        plotting.show_perf_stats(returns, benchmark_rets,
+        performace_stats_df = plotting.show_perf_stats(returns, 
+                                 benchmark_rets,
                                 positions=positions,
                                 transactions=transactions,
                                 turnover_denom=turnover_denom,
                                 bootstrap=bootstrap,
                                 live_start_date=live_start_date,
-                                header_rows=header_rows)
+                                header_rows=header_rows, 
+                                return_df=True).drop('Kurtosis').drop('Calmar ratio').drop('Stability').drop('Omega ratio').drop('Tail ratio').drop('Alpha').drop('Beta').drop('Skew').drop('Daily value at risk')
 
-        plotting.show_worst_drawdown_periods(returns)
+        #plotting.show_worst_drawdown_periods(returns)
 
         vertical_sections = 11
 
@@ -406,21 +391,38 @@ class Portfolio:
 
         i = 2
 
-        ax_rolling_returns = plt.subplot(gs[i, :-1])
-        ax_annual_returns = plt.subplot(gs[i, 2])
+        ax_top_0 = plt.subplot(gs[i, 0])
+        # correlation matrix spills leftwards
+        ax_top_12 = plt.subplot(gs[i, 2])
 
+        i+=1 
+
+        ax_text_table = plt.subplot(gs[i, 0])
+        ax_rolling_returns = plt.subplot(gs[i, 1:])
+        
         i+=1
 
         ax_drawdown = plt.subplot(gs[i, 0])
         ax_monthly_heatmap = plt.subplot(gs[i, 1])
-        ax_returns = plt.subplot(gs[i, 2])
+        ax_annual_returns = plt.subplot(gs[i, 2])
 
         i+=1 
 
         ax_underwater = plt.subplot(gs[i, 0])
         ax_monthly_dist = plt.subplot(gs[i, 1])
-        ax_rolling_volatility = plt.subplot(gs[i, 2])
+        ax_returns = plt.subplot(gs[i, 2])
         i += 1
+
+        ax_efficient_frontier = plt.subplot(gs[i,:-1])
+        ax_rolling_volatility = plt.subplot(gs[i, 2])
+
+        #i+=1
+        #ax_covariance_matrix = plt.subplot(gs[i,0])
+
+        self.__plot_dataframe_text(performace_stats_df, ax=ax_top_0)
+        self.__plot_heatmap(ax=ax_top_12)
+
+        self.__plot_legend(ax_text_table)
 
         plotting.plot_returns(returns, live_start_date=live_start_date, ax=ax_returns)
         ax_returns.set_title('Returns')
@@ -431,17 +433,17 @@ class Portfolio:
         plotting.plot_drawdown_periods(returns, top=5, ax=ax_drawdown)
         plotting.plot_drawdown_underwater(returns=returns, ax=ax_underwater)
 
-        plotting.plot_rolling_returns(
-            returns,
-            factor_returns=benchmark_rets,
-            live_start_date=live_start_date,
-            cone_std=cone_std,
-            ax=ax_rolling_returns)
+        self.__plot_rolling_returns(returns, factor_returns=benchmark_rets, live_start_date=live_start_date, ax=ax_rolling_returns)
         ax_rolling_returns.set_title('Cumulative returns')
 
         plotting.plot_monthly_returns_heatmap(returns, ax=ax_monthly_heatmap)
         plotting.plot_annual_returns(returns, ax=ax_annual_returns)
         plotting.plot_monthly_returns_dist(returns, ax=ax_monthly_dist)
+
+        self.plot_efficient_frontier(max_sharpe_portf, ax=ax_efficient_frontier)
+
+        
+        #self.plot_backtest_portfolio(max_sharpe_portf, ax=ax_covariance_matrix)
 
         for ax in fig.axes:
             plt.setp(ax.get_xticklabels(), visible=True)
@@ -461,3 +463,221 @@ class Portfolio:
         portf_sharpe_ratio = (portf_returns - rf_rate) / portf_volatility
         return -portf_sharpe_ratio
     
+    def __plot_dataframe_text(self, df : pd.DataFrame, ax):
+        ax.xaxis.set_visible(False)
+        ax.yaxis.set_visible(False)
+        ax.set_frame_on(False)
+
+        table_data = [[key, df.loc[key]['Backtest']] for key in [key for key in df.index]]
+
+        ax.table(cellText=table_data, colLabels=['', ''], loc='center')
+    
+    def __plot_legend(self, ax):
+        legend_elements = []
+
+        legend_elements.append(Line2D([0], [0], color=PORTFOLIO_COLOUR, lw=2, label="Portfolio"))
+        legend_elements.append(Line2D([0], [0], color="black", lw=2, label="Benchmark"))
+        for fund in self.fund_selection:
+            legend_elements.append(Line2D([0], [0], color=fund.colour(), lw=1, label=f"{(fund.weight*100):.2f}% - {fund.short_name()}"))
+
+        ax.axis('off')
+        ax.legend(handles=legend_elements, loc='center')
+
+    def __plot_heatmap(
+        self, 
+        ax
+    ):
+        #plt.figure(figsize=(12, 10))
+        sns.heatmap(self.correlation_matrix, annot=True, fmt=".2f", cmap="Blues", cbar=False, ax=ax, yticklabels=True, xticklabels=False)
+        plt.title("Correlation Matrix")
+        plt.tight_layout()
+        #plt.show()
+
+        return
+
+    def __plot_rolling_returns(
+        self,
+        returns,
+        factor_returns=None,
+        live_start_date=None,
+        logy=False,
+        cone_std=None,
+        legend_loc="best",
+        volatility_match=False,
+        cone_function=timeseries.forecast_cone_bootstrap,
+        ax=None,
+        **kwargs,
+    ):
+        if ax is None:
+            ax = plt.gca()
+
+        ax.set_xlabel("")
+        ax.set_ylabel("Cumulative returns")
+        ax.set_yscale("log" if logy else "linear")
+
+        if volatility_match and factor_returns is None:
+            raise ValueError("volatility_match requires passing of factor_returns.")
+        elif volatility_match and factor_returns is not None:
+            bmark_vol = factor_returns.loc[returns.index].std()
+            returns = (returns / returns.std()) * bmark_vol
+
+        cum_rets = ep.cum_returns(returns, 1.0)
+        
+        fund_cum_returns=[]
+        for fund in self.fund_selection:
+            fund_cum_returns.append(ep.cum_returns(self.adjusted_returns[fund.name], 1.0))
+
+        y_axis_formatter = FuncFormatter(utils.two_dec_places)
+        ax.yaxis.set_major_formatter(FuncFormatter(y_axis_formatter))
+
+        # benchmark
+        if factor_returns is not None:
+            cum_factor_returns = ep.cum_returns(factor_returns.loc[cum_rets.index], 1.0)
+            cum_factor_returns.plot(
+                lw=2,
+                color="black",
+                #label="Benchmark",
+                alpha=0.8,
+                ax=ax, 
+                **kwargs,
+            )
+
+        if live_start_date is not None:
+            live_start_date = ep.utils.get_utc_timestamp(live_start_date)
+            is_cum_returns = cum_rets.loc[cum_rets.index < live_start_date]
+            oos_cum_returns = cum_rets.loc[cum_rets.index >= live_start_date]
+        else:
+            is_cum_returns = cum_rets
+            oos_cum_returns = pd.Series([], dtype="float64")
+
+        is_cum_returns.plot(
+            lw=2, 
+            color=PORTFOLIO_COLOUR, 
+            alpha=0.8, 
+            #label="Returns", 
+            ax=ax, 
+            **kwargs
+        )
+        for i in range(len(fund_cum_returns)):
+            fund = self.fund_selection[i]
+            fund_cum_returns[i].plot(
+                lw=1, 
+                color=fund.colour(), 
+                alpha=0.6, 
+                #label=f"{round(fund.weight,4)*100.0:.2f}% - {fund.short_name()}", 
+                ax=ax, 
+                **kwargs)
+
+        if len(oos_cum_returns) > 0:
+            oos_cum_returns.plot(
+                lw=2, color="red", alpha=0.6, label="Live", ax=ax, **kwargs
+            )
+
+        #if legend_loc is not None:
+        #    ax.legend(loc=legend_loc, frameon=True, framealpha=0.5)
+        ax.axhline(1.0, linestyle="--", color="black", lw=1)
+
+        return ax
+    
+    def show_perf_stats(
+        self,
+        returns,
+        factor_returns=None,
+        positions=None,
+        transactions=None,
+        turnover_denom="AGB",
+        live_start_date=None,
+        bootstrap=False,
+        header_rows=None,
+        return_df=False,
+    ):
+        perf_func = timeseries.perf_stats
+
+        perf_stats_all = perf_func(
+            returns,
+            factor_returns=factor_returns,
+            positions=positions,
+            transactions=transactions,
+            turnover_denom=turnover_denom,
+        )
+
+        date_rows = OrderedDict()
+        if len(returns.index) > 0:
+            date_rows["Start date"] = returns.index[0].strftime("%Y-%m-%d")
+            date_rows["End date"] = returns.index[-1].strftime("%Y-%m-%d")
+
+        if live_start_date is not None:
+            live_start_date = ep.utils.get_utc_timestamp(live_start_date)
+            returns_is = returns[returns.index < live_start_date]
+            returns_oos = returns[returns.index >= live_start_date]
+
+            positions_is = None
+            positions_oos = None
+            transactions_is = None
+            transactions_oos = None
+
+            if positions is not None:
+                positions_is = positions[positions.index < live_start_date]
+                positions_oos = positions[positions.index >= live_start_date]
+                if transactions is not None:
+                    transactions_is = transactions[(transactions.index < live_start_date)]
+                    transactions_oos = transactions[(transactions.index > live_start_date)]
+
+            perf_stats_is = perf_func(
+                returns_is,
+                factor_returns=factor_returns,
+                positions=positions_is,
+                transactions=transactions_is,
+                turnover_denom=turnover_denom,
+            )
+
+            perf_stats_oos = perf_func(
+                returns_oos,
+                factor_returns=factor_returns,
+                positions=positions_oos,
+                transactions=transactions_oos,
+                turnover_denom=turnover_denom,
+            )
+            if len(returns.index) > 0:
+                date_rows["In-sample months"] = int(
+                    len(returns_is) / APPROX_BDAYS_PER_MONTH
+                )
+                date_rows["Out-of-sample months"] = int(
+                    len(returns_oos) / APPROX_BDAYS_PER_MONTH
+                )
+
+            perf_stats = pd.concat(
+                OrderedDict(
+                    [
+                        ("In-sample", perf_stats_is),
+                        ("Out-of-sample", perf_stats_oos),
+                        ("All", perf_stats_all),
+                    ]
+                ),
+                axis=1,
+            )
+        else:
+            if len(returns.index) > 0:
+                date_rows["Total months"] = int(len(returns) / APPROX_BDAYS_PER_MONTH)
+            perf_stats = pd.DataFrame(perf_stats_all, columns=["Backtest"])
+
+        for column in perf_stats.columns:
+            for stat, value in perf_stats[column].items():
+                if stat in STAT_FUNCS_PCT:
+                    perf_stats.loc[stat, column] = str(np.round(value * 100, 3)) + "%"
+        if header_rows is None:
+            header_rows = date_rows
+        else:
+            header_rows = OrderedDict(header_rows)
+            header_rows.update(date_rows)
+
+        if return_df:
+            return perf_stats
+        utils.print_table(
+            perf_stats,
+            float_format="{0:.2f}".format,
+            header_rows=header_rows,
+        )
+
+
+            
