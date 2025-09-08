@@ -302,18 +302,15 @@ class Portfolio:
         return max_sharpe_portf
     
     #Plot the calculated Efficient Frontier, together with the simulated portfolios
-
-    def plot_efficient_frontier(self, max_sharpe_portf, ax=None):
+    def __plot_efficient_frontier(self, max_sharpe_portf, ax=None):
         if ax == None:
             ax = plt.subplots()
 
         max_sharpe_portf['Results'].plot(kind='scatter', x='volatility',
                              y='returns', c='sharpe_ratio',
-                             cmap='PuBu', edgecolors='white',
-                             #figsize=(9, 6),
-                             alpha=0.1,
+                             cmap='turbo', edgecolors='white',
+                             alpha=0.6,
                              ax=ax)
-
 
         # draw the efficient frontier lines
         ax.plot(max_sharpe_portf['VolsRange'], max_sharpe_portf['ReturnsRange'], 'b--', linewidth=2, alpha=0.3)
@@ -366,7 +363,7 @@ class Portfolio:
             returns = utils.clip_returns_to_benchmark(returns, benchmark_rets)
 
         performace_stats_df = plotting.show_perf_stats(returns, 
-                                 benchmark_rets,
+                               benchmark_rets,
                                 positions=positions,
                                 transactions=transactions,
                                 turnover_denom=turnover_denom,
@@ -374,9 +371,7 @@ class Portfolio:
                                 live_start_date=live_start_date,
                                 header_rows=header_rows, 
                                 return_df=True).drop('Kurtosis').drop('Calmar ratio').drop('Stability').drop('Omega ratio').drop('Tail ratio').drop('Alpha').drop('Beta').drop('Skew').drop('Daily value at risk')
-
-        #plotting.show_worst_drawdown_periods(returns)
-
+        
         vertical_sections = 11
 
         if live_start_date is not None:
@@ -394,26 +389,23 @@ class Portfolio:
         ax_top_0 = plt.subplot(gs[i, 0])
         # correlation matrix spills leftwards
         ax_top_12 = plt.subplot(gs[i, 2])
-
         i+=1 
 
         ax_text_table = plt.subplot(gs[i, 0])
         ax_rolling_returns = plt.subplot(gs[i, 1:])
-        
         i+=1
 
         ax_drawdown = plt.subplot(gs[i, 0])
         ax_monthly_heatmap = plt.subplot(gs[i, 1])
         ax_annual_returns = plt.subplot(gs[i, 2])
-
         i+=1 
 
         ax_underwater = plt.subplot(gs[i, 0])
-        ax_monthly_dist = plt.subplot(gs[i, 1])
-        ax_returns = plt.subplot(gs[i, 2])
+        ax_efficient_frontier = plt.subplot(gs[i,1:])
         i += 1
 
-        ax_efficient_frontier = plt.subplot(gs[i,:-1])
+        ax_returns = plt.subplot(gs[i, 0])
+        ax_monthly_dist = plt.subplot(gs[i, 1])
         ax_rolling_volatility = plt.subplot(gs[i, 2])
 
         #i+=1
@@ -440,7 +432,7 @@ class Portfolio:
         plotting.plot_annual_returns(returns, ax=ax_annual_returns)
         plotting.plot_monthly_returns_dist(returns, ax=ax_monthly_dist)
 
-        self.plot_efficient_frontier(max_sharpe_portf, ax=ax_efficient_frontier)
+        self.__plot_efficient_frontier(max_sharpe_portf, ax=ax_efficient_frontier)
 
         
         #self.plot_backtest_portfolio(max_sharpe_portf, ax=ax_covariance_matrix)
@@ -470,7 +462,10 @@ class Portfolio:
 
         table_data = [[key, df.loc[key]['Backtest']] for key in [key for key in df.index]]
 
-        ax.table(cellText=table_data, colLabels=['', ''], loc='center')
+        table = ax.table(cellText=table_data, colLabels=['Portfolio', f'{self._price_years} Years'], loc='center')
+        table.auto_set_font_size(False)
+        table.scale(1.5, 1.5)
+        table.set_fontsize(10)
     
     def __plot_legend(self, ax):
         legend_elements = []
@@ -487,11 +482,9 @@ class Portfolio:
         self, 
         ax
     ):
-        #plt.figure(figsize=(12, 10))
-        sns.heatmap(self.correlation_matrix, annot=True, fmt=".2f", cmap="Blues", cbar=False, ax=ax, yticklabels=True, xticklabels=False)
+        sns.heatmap(self.correlation_matrix, annot=True, fmt=".2f", cmap="Blues", cbar=True, ax=ax, yticklabels=True, xticklabels=False)
         plt.title("Correlation Matrix")
-        plt.tight_layout()
-        #plt.show()
+        #plt.tight_layout()
 
         return
 
@@ -536,7 +529,6 @@ class Portfolio:
             cum_factor_returns.plot(
                 lw=2,
                 color="black",
-                #label="Benchmark",
                 alpha=0.8,
                 ax=ax, 
                 **kwargs,
@@ -554,7 +546,6 @@ class Portfolio:
             lw=2, 
             color=PORTFOLIO_COLOUR, 
             alpha=0.8, 
-            #label="Returns", 
             ax=ax, 
             **kwargs
         )
@@ -564,7 +555,6 @@ class Portfolio:
                 lw=1, 
                 color=fund.colour(), 
                 alpha=0.6, 
-                #label=f"{round(fund.weight,4)*100.0:.2f}% - {fund.short_name()}", 
                 ax=ax, 
                 **kwargs)
 
@@ -573,8 +563,6 @@ class Portfolio:
                 lw=2, color="red", alpha=0.6, label="Live", ax=ax, **kwargs
             )
 
-        #if legend_loc is not None:
-        #    ax.legend(loc=legend_loc, frameon=True, framealpha=0.5)
         ax.axhline(1.0, linestyle="--", color="black", lw=1)
 
         return ax
