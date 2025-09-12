@@ -19,7 +19,7 @@ public partial class PortfolioContext : DbContext
     public virtual DbSet<PriceDate> DateRange { get; set; }
     public virtual DbSet<Portfolio> Portfolio { get; set; }
     public virtual DbSet<PortfolioHolding> PortfolioHolding { get; set; }
-    public virtual DbSet<ProxyInstrument> ProxyInstrument { get; set; }
+    //public virtual DbSet<ProxyInstrument> ProxyInstrument { get; set; }
     public virtual DbSet<AdjustedReturn> AdjustedReturn { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
@@ -35,10 +35,10 @@ public partial class PortfolioContext : DbContext
     {
         modelBuilder.Entity<InstrumentMonthlyDelta>().ToView("InstrumentMonthlyDelta");
 
-        modelBuilder.Entity<ProxyInstrument>()
-                .HasOne(pi => pi.Proxy)
-                .WithMany(i => i.Proxies)
-                .HasForeignKey(pi => pi.InstrumentId)
-                .OnDelete(DeleteBehavior.NoAction);
+        //modelBuilder.Entity<ProxyInstrument>()
+        //        .HasOne(pi => pi.Proxy)
+        //        .WithMany(i => i.Proxies)
+        //        .HasForeignKey(pi => pi.InstrumentId)
+        //        .OnDelete(DeleteBehavior.NoAction);
     }
 }

@@ -253,80 +253,76 @@ namespace Portfolio.Scrape
         {
             using var context = new PortfolioContext();
 
-            // Stepwise refinement if networking issues on top of Refit
-            for(int i=0; i < 3; i++)
+            var instrumentKeys
+                = await context.Instrument
+                            .Where(i => i.ISIN != null && i.MarketCode == null)
+                            //.Where(i => i.ISIN == "IE00BJK9HD13")
+                            .Select(i => new { i.ISIN, i.Sedol })
+                            .Distinct()
+                            .ToListAsync();
+
+            // Setting too high triggers errors
+            ParallelOptions parallelOptions = new()
             {
-                var instrumentKeys
-                    = await context.Instrument
-                                .Where(i => i.ISIN != null && i.MarketCode == null)
-                                //.Where(i => i.ISIN == "IE00BJK9HD13")
-                                .Select(i => new { i.ISIN, i.Sedol })
-                                .Distinct()
-                                .ToListAsync();
+                MaxDegreeOfParallelism = 1
+            };
 
-                // Setting too high triggers errors
-                ParallelOptions parallelOptions = new()
+            int count = 0;
+            await Parallel.ForEachAsync(instrumentKeys, parallelOptions, async (key, cancellationToken) =>
+            {
+                using var context = new PortfolioContext();
+
+                var isin = key.ISIN;
+                var sedol = key.Sedol;
+                var searchText = sedol != null ? $"{isin}&{sedol}" : $"{isin}";
+
+                SearchResult searchResult = null;
+                try
                 {
-                    MaxDegreeOfParallelism = 1
-                };
-
-                int count = 0;
-                await Parallel.ForEachAsync(instrumentKeys, parallelOptions, async (key, cancellationToken) =>
+                    searchResult = await _campanelloApi.Search(searchText);
+                    Thread.Sleep(200);
+                }
+                catch (Exception ex)
                 {
-                    using var context = new PortfolioContext();
+                    Console.WriteLine($"Error searching for {searchText}: {ex.Message}");
+                    return;
+                }
 
-                    var isin = key.ISIN;
-                    var sedol = key.Sedol;
-                    var searchText = sedol != null ? $"{isin}&{sedol}" : $"{isin}";
+                foreach (var result in searchResult?.data?.results)
+                {
+                    var marketCode = result.marketCode;
 
-                    SearchResult searchResult = null;
-                    try
+                    bool existsMarketCode = await context.Instrument.AnyAsync(i => i.MarketCode == marketCode);
+
+                    if (existsMarketCode)
                     {
-                        searchResult = await _campanelloApi.Search(searchText);
-                        Thread.Sleep(200);
+                        Interlocked.Increment(ref count);
+                        Console.WriteLine($"[{count} of {instrumentKeys.Count}] - Skipping {marketCode} as already exists");
+                        continue;
                     }
-                    catch (Exception ex)
+
+                    var exchangeCode = result.market;
+                    var currency = result.currencyCode;
+
+                    var instrument = context.Instrument
+                        .FirstOrDefault(i =>
+                                            i.ISIN == isin &&
+                                            i.Sedol == sedol &&
+                                            ((i.ExchangeCode == exchangeCode) || (exchangeCode == "FUND")) &&
+                                            ((i.Currency == currency) || (i.Currency.StartsWith("GB") && currency.StartsWith("GB")))
+                                        );
+
+                    if (instrument != null)
                     {
-                        Console.WriteLine($"Error searching for {searchText}: {ex.Message}");
-                        return;
+                        instrument.MarketCode = marketCode;
+
+                        context.SaveChanges();
+
+                        Interlocked.Increment(ref count);
+                        Console.WriteLine($"[{count} of {instrumentKeys.Count}] - Saving market Code for {instrument.Name}, ISIN={instrument.ISIN} => {instrument.MarketCode}");
                     }
-
-                    foreach (var result in searchResult?.data?.results)
-                    {
-                        var marketCode = result.marketCode;
-
-                        bool existsMarketCode = await context.Instrument.AnyAsync(i => i.MarketCode == marketCode);
-
-                        if (existsMarketCode)
-                        {
-                            Interlocked.Increment(ref count);
-                            Console.WriteLine($"[{count} of {instrumentKeys.Count}] - Skipping {marketCode} as already exists");
-                            continue;
-                        }
-
-                        var exchangeCode = result.market;
-                        var currency = result.currencyCode;
-
-                        var instrument = context.Instrument
-                            .FirstOrDefault(i =>
-                                                i.ISIN == isin &&
-                                                i.Sedol == sedol &&
-                                                ((i.ExchangeCode == exchangeCode) || (exchangeCode == "FUND")) &&
-                                                ((i.Currency == currency) || (i.Currency.StartsWith("GB") && currency.StartsWith("GB")))
-                                           );
-
-                        if (instrument != null)
-                        {
-                            instrument.MarketCode = marketCode;
-
-                            context.SaveChanges();
-
-                            Interlocked.Increment(ref count);
-                            Console.WriteLine($"[{count} of {instrumentKeys.Count}] - Saving market Code for {instrument.Name}, ISIN={instrument.ISIN} => {instrument.MarketCode}");
-                        }
-                    }
-                });
-            }
+                }
+            });
         }
 
         public async Task ScrapeHoldings()
@@ -481,40 +477,37 @@ namespace Portfolio.Scrape
         {
             using var context = new PortfolioContext();
 
-            for (int i = 0; i < 3; i++)
+            var instruments
+                = context.Instrument
+                    //.Where(i => i.ISIN == "IE000AI6QNJ5")                    
+                    .Where(i => i.MarketCode != null && i.RiskRating == null)
+                    .ToList();
+
+            //var parallelOptions = new ParallelOptions
+            //{
+            //    MaxDegreeOfParallelism = 1
+            //};
+
+            int count = 0;
+            //await Parallel.ForEachAsync(instruments.Select(x => x.Id), parallelOptions, async (instrumentId, cancellationToken) =>
+            foreach(var instrument in instruments)
             {
-                var instruments
-                    = context.Instrument
-                        //.Where(i => i.ISIN == "IE000AI6QNJ5")                    
-                        .Where(i => i.MarketCode != null && i.RiskRating == null)
-                        .ToList();
+                //using var context = new PortfolioContext();
+                //var instrument = context.Instrument.FirstOrDefault(i => i.Id == instrumentId);
 
-                //var parallelOptions = new ParallelOptions
-                //{
-                //    MaxDegreeOfParallelism = 1
-                //};
+                var updated = await UpdateRiskValues(instrument);
 
-                int count = 0;
-                //await Parallel.ForEachAsync(instruments.Select(x => x.Id), parallelOptions, async (instrumentId, cancellationToken) =>
-                foreach(var instrument in instruments)
+                if (updated)
                 {
-                    //using var context = new PortfolioContext();
-                    //var instrument = context.Instrument.FirstOrDefault(i => i.Id == instrumentId);
+                    context.SaveChanges();
 
-                    var updated = await UpdateRiskValues(instrument);
-
-                    if (updated)
-                    {
-                        context.SaveChanges();
-
-                        Interlocked.Increment(ref count);
-                        Console.WriteLine($"[{count} of {instruments.Count}] - Saving Risk Rating {instrument.Name} ({instrument.ISIN}) = {instrument.RiskRating}");
-                    }
-                    else
-                    {
-                        Interlocked.Increment(ref count);
-                        Console.WriteLine($"[{count} of {instruments.Count}] - No Risk Rating found for {instrument.Name} ({instrument.ISIN})");
-                    }
+                    Interlocked.Increment(ref count);
+                    Console.WriteLine($"[{count} of {instruments.Count}] - Saving Risk Rating {instrument.Name} ({instrument.ISIN}) = {instrument.RiskRating}");
+                }
+                else
+                {
+                    Interlocked.Increment(ref count);
+                    Console.WriteLine($"[{count} of {instruments.Count}] - No Risk Rating found for {instrument.Name} ({instrument.ISIN})");
                 }
             }
         }

@@ -13,29 +13,6 @@ class DbQuery:
         from sqlalchemy import create_engine
         self._db_engine = create_engine(connection_url)        
 
-    # def get_min_max_dates(self, names_csv):
-    #     min_max_data_query = f"WITH FundDateRanges as \
-    #     ( \
-    #         select I.Id, I.[Name], min(AR.Date) as minDate, max(AR.Date) as maxDate \
-    #             from dbo.Instrument I \
-    #             join dbo.AdjustedReturn AR on AR.InstrumentId = i.Id \
-    #         where name in \
-    #         ( \
-    #             {names_csv} \
-    #         ) \
-    #         group by I.Id, I.[Name] \
-    #     ) \
-    #     select max(minDate) as minDate, min(maxDate) as maxDate from FundDateRanges" 
-    #     #print(minMaxDateQuery)
-
-    #     with self._db_engine.connect() as connection:
-    #         min_max_date = pd.read_sql_query(min_max_data_query, connection)
-
-    #     min_date = min_max_date['minDate'][0]
-    #     max_date = min_max_date['maxDate'][0]
-
-    #     return min_date, max_date
-    
     def get_monthly_returns(self, fund_name, years):
         query = f"""
                     SELECT 
@@ -83,6 +60,42 @@ class DbQuery:
         df.set_index('Date', inplace=True)
 
         return df
+
+    def get_portfolio(self, names_csv):
+        query = f"""select 
+	Name, 
+	InstrumentType as Type, 
+	IMASectorName as Sector, 
+	ISIN, 
+	'https://uk.finance.yahoo.com/quote/' + y_symbol as Yahoo, 
+	'http://ajbell.co.uk/market-research/' + MarketCode as AjBell,
+    EquityHoldings as Holds,
+	Round(PERatio, 1) as 'P/E',
+	RatioUnitedStates as US,
+	RatioTechnology as Tech,
+	StockLong as 'Stock L',
+	StockShort as 'Stock S',
+	BondLong as 'Bond L',
+	BondShort as 'Bond S', 
+	CashLong as 'Cash L',
+	CashShort as 'Cash S',
+	OngoingCharge as 'Charge',
+	Correlation as 'Corr',
+	MaxDrawdown as 'Drawdown',
+	YR_ReturnM12_5 / 100.0 as '2020',
+	YR_ReturnM12_4 / 100.0 as '2021',
+	YR_ReturnM12_3 / 100.0 as '2022',
+	YR_ReturnM12_2 / 100.0 as '2023',
+	YR_ReturnM12_1 / 100.0 as '2024'
+from 
+	dbo.Instrument 
+where 
+	name in ({names_csv})"""
+
+        with self._db_engine.connect() as connection:
+            results = pd.read_sql_query(query, connection)
+            results.set_index("Name", inplace=True)
+            return results
 
 
 

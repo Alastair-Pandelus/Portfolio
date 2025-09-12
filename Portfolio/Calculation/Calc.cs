@@ -10,9 +10,9 @@ namespace Portfolio.Calculation
         //public Task SynthesiseMissingPrices();
         public Task SetMaxDrawdown();
         public Task SetMarketCorrelations();
-        public Task SetProxyInstruments();
+        //public Task SetProxyInstruments();
         public Task SetAdjustedReturns();
-        public Task GetWatchlistCorrelations();
+        //public Task GetWatchlistCorrelations();
         public Task SetSharpeRatio();
     }
 
@@ -139,71 +139,49 @@ namespace Portfolio.Calculation
             });
         }
 
-        public async Task SetProxyInstruments()
-        {
-            using var context = new PortfolioContext();
-            var dbInstruments = context.Set<Instrument>();
+        //public async Task SetProxyInstruments()
+        //{
+        //    using var context = new PortfolioContext();
+        //    var dbInstruments = context.Set<Instrument>();
 
-            var ranmoreGlobalEquityInstitutionalGBP = await dbInstruments
-                .FirstOrDefaultAsync(i => i.Name == "Ranmore Global Equity Institutional GBP");
+        //    var ranmoreGlobalEquityInstitutionalGBP = await dbInstruments
+        //        .FirstOrDefaultAsync(i => i.Name == "Ranmore Global Equity Institutional GBP");
 
-            var ranmoreGlobalEquityInvestorGBP = await dbInstruments
-                .FirstOrDefaultAsync(i => i.Name == "Ranmore Global Equity Investor GBP");
+        //    var ranmoreGlobalEquityInvestorGBP = await dbInstruments
+        //        .FirstOrDefaultAsync(i => i.Name == "Ranmore Global Equity Investor GBP");
 
-            var dbProxies = context.Set<ProxyInstrument>();
-        }
+        //    //var dbProxies = context.Set<ProxyInstrument>();
+        //}
 
         public async Task SetAdjustedReturns()
         {
             using var context = new PortfolioContext();
             var dbInstruments = context.Set<Instrument>();
-            var dbPrices = context.Set<Price>();
 
-            //not exists(select* from dbo.AdjustedReturn A where A.InstrumentId = i.Id)
-	        //where exists(select * from dbo.Price P where P.InstrumentId = i.Id) and
-
-            var instruments = await dbInstruments.FromSqlRaw
-                (
-                    @"select * from dbo.Instrument i
-                        where i.Id = 7127"
-               )
-               .Include(i => i.Proxies)
-               .ToListAsync();
+            var instrumentIds = dbInstruments.Select(i => i.Id).ToList();
 
             int count = 0;
-            foreach (var instrument in instruments)
+            foreach (var instrumentId in instrumentIds)
             {
-                await SetInstrumentAdjustedReturns(dbInstruments, context, instrument);
-                Console.WriteLine($"[{++count} of {instruments.Count}] - Set Adjusted Returns for Instrument: {instrument.Name} (ISIN: {instrument.ISIN})");
+                var instrument = await SetInstrumentAdjustedReturns(dbInstruments, context, instrumentId);
+                Console.WriteLine($"[{++count} of {instrumentIds.Count}] - Set Adjusted Returns for Instrument: {instrument.Name} (ISIN: {instrument.ISIN})");
+                context.Entry(instrument).State = EntityState.Detached;
             }
         }
 
-        public async Task SetInstrumentAdjustedReturns(DbSet<Instrument> dbInstruments, PortfolioContext context, Instrument instrument)
+        public static async Task<Instrument> SetInstrumentAdjustedReturns(DbSet<Instrument> dbInstruments, PortfolioContext context, int instrumentId)
         {
+            var instrument = dbInstruments.Where(i => i.Id == instrumentId).FirstOrDefault();
             var instrumentEntry = context.Entry(instrument);
 
-            Dictionary<int, List<Price>> prices = [];
+            Dictionary<int, List<
+                Price>> prices = [];
 
             await instrumentEntry
                 .Collection(i => i.Prices)
                 .LoadAsync();
 
             prices[instrument.Id] = [.. instrument.Prices.OrderByDescending(p => p.Date)];
-
-            DateOnly? minSharedProxyInstrumentPriceDate = null;
-            foreach (var proxy in instrument.Proxies)
-            {
-                minSharedProxyInstrumentPriceDate = await GetProxyPrices(dbInstruments, prices, minSharedProxyInstrumentPriceDate, proxy);
-            }
-
-            // Get proxy prices for dates greater than or equal to the minimum shared proxy instrument price date
-            if (minSharedProxyInstrumentPriceDate.HasValue)
-            {
-                foreach (var proxy in instrument.Proxies)
-                {
-                    prices[proxy.ProxyId] = [.. prices[proxy.ProxyId].Where(p => p.Date >= minSharedProxyInstrumentPriceDate.Value)];
-                }
-            }
 
             await instrumentEntry
                     .Collection(i => i.AdjustedReturns)
@@ -239,191 +217,161 @@ namespace Portfolio.Calculation
                     adjustedReturns.Add(adjustedReturn);
                 }
             }
-
-            if (minSharedProxyInstrumentPriceDate != null && currentDate != null)
-            {
-                var proxyPricesOffset 
-                    = prices[instrument.Proxies.First().ProxyId]
-                        .FindIndex(p => p.Date < currentDate);
-
-                var firstProxy = instrument.Proxies.First();
-                for (int j=proxyPricesOffset; j < prices[firstProxy.ProxyId].Count - 1; j++)
-                {
-                    var priceDelta = GetWeightedProxyPriceDelta(instrument.Proxies, prices, j);
-
-                    var adjustedReturn = new AdjustedReturn
-                    {
-                        InstrumentId = instrument.Id,
-                        Date = prices[firstProxy.ProxyId][j].Date,
-                        LogValue = Math.Log(priceDelta)
-                    };
-                    var existingReturn = adjustedReturns.FirstOrDefault(ar => ar.Date == adjustedReturn.Date);
-                    if (existingReturn != null)
-                    {
-                        // If an adjusted return already exists for this date, update it
-                        existingReturn.LogValue = adjustedReturn.LogValue;
-                    }
-                    else
-                    {
-                        // Otherwise, add the new adjusted return
-                        adjustedReturns.Add(adjustedReturn);
-                    }
-                }
-            }
-
             await context.SaveChangesAsync();
+
+            return instrument;
         }
 
-        private double GetWeightedProxyPriceDelta(ICollection<ProxyInstrument> proxies, Dictionary<int, List<Price>> prices, int priceOffset)
-        {
-            var weightedValue = 0.0;
+        //private double GetWeightedProxyPriceDelta(ICollection<ProxyInstrument> proxies, Dictionary<int, List<Price>> prices, int priceOffset)
+        //{
+        //    var weightedValue = 0.0;
 
-            foreach (var proxy in proxies)
-            {
-                weightedValue += (proxy.Weight * prices[proxy.ProxyId][priceOffset].Value / prices[proxy.ProxyId][priceOffset+1].Value);
-            }
-            return weightedValue;
-        }
+        //    foreach (var proxy in proxies)
+        //    {
+        //        weightedValue += (proxy.Weight * prices[proxy.ProxyId][priceOffset].Value / prices[proxy.ProxyId][priceOffset+1].Value);
+        //    }
+        //    return weightedValue;
+        //}
 
-        private static async Task<DateOnly?> GetProxyPrices(DbSet<Instrument> dbInstruments, Dictionary<int, List<Price>> prices, DateOnly? minSharedProxyInstrumentPriceDate, ProxyInstrument proxy)
-        {
-            var proxyInstrument = await dbInstruments
-                .Include(i => i.Prices)
-                .FirstOrDefaultAsync(i => i.Id == proxy.ProxyId);
+        //private static async Task<DateOnly?> GetProxyPrices(DbSet<Instrument> dbInstruments, Dictionary<int, List<Price>> prices, DateOnly? minSharedProxyInstrumentPriceDate, ProxyInstrument proxy)
+        //{
+        //    var proxyInstrument = await dbInstruments
+        //        .Include(i => i.Prices)
+        //        .FirstOrDefaultAsync(i => i.Id == proxy.ProxyId);
 
-            var minProxyInstrumentDate = proxyInstrument.Prices.Select(p => p.Date).Min().ToDateTime(TimeOnly.MinValue);
+        //    var minProxyInstrumentDate = proxyInstrument.Prices.Select(p => p.Date).Min().ToDateTime(TimeOnly.MinValue);
 
-            if (minSharedProxyInstrumentPriceDate == null)
-            {
-                minSharedProxyInstrumentPriceDate = DateOnly.FromDateTime(minProxyInstrumentDate);
-            }
-            else
-            {
-                if(minProxyInstrumentDate.Ticks > minSharedProxyInstrumentPriceDate.Value.ToDateTime(TimeOnly.MinValue).Ticks)
-                {
-                    // If the proxy instrument date starts later than the shared date, update the shared date
-                    minSharedProxyInstrumentPriceDate = DateOnly.FromDateTime(minProxyInstrumentDate);
-                }
-            }
+        //    if (minSharedProxyInstrumentPriceDate == null)
+        //    {
+        //        minSharedProxyInstrumentPriceDate = DateOnly.FromDateTime(minProxyInstrumentDate);
+        //    }
+        //    else
+        //    {
+        //        if(minProxyInstrumentDate.Ticks > minSharedProxyInstrumentPriceDate.Value.ToDateTime(TimeOnly.MinValue).Ticks)
+        //        {
+        //            // If the proxy instrument date starts later than the shared date, update the shared date
+        //            minSharedProxyInstrumentPriceDate = DateOnly.FromDateTime(minProxyInstrumentDate);
+        //        }
+        //    }
 
-            prices[proxyInstrument.Id] = [.. proxyInstrument.Prices.OrderByDescending(p => p.Date)];
-            return minSharedProxyInstrumentPriceDate;
-        }
+        //    prices[proxyInstrument.Id] = [.. proxyInstrument.Prices.OrderByDescending(p => p.Date)];
+        //    return minSharedProxyInstrumentPriceDate;
+        //}
 
-        public async Task GetWatchlistCorrelations()
-        {
-            using var context = new PortfolioContext();
-            var dbInstruments = context.Set<Instrument>();
-            var dbCorrelations = context.Set<EntityModel.Correlation>();
+        //public async Task GetWatchlistCorrelations()
+        //{
+        //    using var context = new PortfolioContext();
+        //    var dbInstruments = context.Set<Instrument>();
+        //    var dbCorrelations = context.Set<EntityModel.Correlation>();
 
-            var instruments = await dbInstruments.Where(i => i.Watchlist).ToListAsync();
-            var instrumentIds = instruments.Select(i => i.Id).ToList();
+        //    var instruments = await dbInstruments.Where(i => i.Watchlist).ToListAsync();
+        //    var instrumentIds = instruments.Select(i => i.Id).ToList();
 
-            var instrument5YearDeltas =
-                (await context.InstrumentMonthlyDelta
-                    .Where(d => d.Month > -60)
-                    .ToListAsync())
-                    .ToList()
-                    .Where(i => instrumentIds.Contains(i.InstrumentId))
-                    .ToList();
+        //    var instrument5YearDeltas =
+        //        (await context.InstrumentMonthlyDelta
+        //            .Where(d => d.Month > -60)
+        //            .ToListAsync())
+        //            .ToList()
+        //            .Where(i => instrumentIds.Contains(i.InstrumentId))
+        //            .ToList();
 
-            //var existingCorrelations = await dbCorrelations
-            //    .Where(c => instrumentIds.Contains(c.Instrument1Id) && instrumentIds.Contains(c.Instrument2Id))
-            //    .ToDictionaryAsync(c => c.Instrument1Id, c => c.Instrument2Id);
+        //    //var existingCorrelations = await dbCorrelations
+        //    //    .Where(c => instrumentIds.Contains(c.Instrument1Id) && instrumentIds.Contains(c.Instrument2Id))
+        //    //    .ToDictionaryAsync(c => c.Instrument1Id, c => c.Instrument2Id);
 
-            Dictionary<int, double[]> instrumentDeltas = [];
+        //    Dictionary<int, double[]> instrumentDeltas = [];
 
-            foreach (var instrumentId in instrumentIds)
-            {
-                var deltas = instrument5YearDeltas
-                    .Where(i => i.InstrumentId == instrumentId)
-                    // 0 is current month, -1 is previous month, etc.
-                    .OrderByDescending(i => i.Month)
-                    .Select(i => i.Delta)
-                    .ToArray();
+        //    foreach (var instrumentId in instrumentIds)
+        //    {
+        //        var deltas = instrument5YearDeltas
+        //            .Where(i => i.InstrumentId == instrumentId)
+        //            // 0 is current month, -1 is previous month, etc.
+        //            .OrderByDescending(i => i.Month)
+        //            .Select(i => i.Delta)
+        //            .ToArray();
 
-                instrumentDeltas[instrumentId] = deltas;
-            }
+        //        instrumentDeltas[instrumentId] = deltas;
+        //    }
 
-            int count = 0;
-            var maxCount = ((instrumentDeltas.Count * instrumentDeltas.Count) / 2) - 1;
-            for (int i = 0; i < instrumentDeltas.Count; i++)
-            {
-                var id1 = instrumentIds[i];
-                var name1 = instruments.FirstOrDefault(i => i.Id == id1).Name;
-                var deltas1 = instrumentDeltas[id1];
+        //    int count = 0;
+        //    var maxCount = ((instrumentDeltas.Count * instrumentDeltas.Count) / 2) - 1;
+        //    for (int i = 0; i < instrumentDeltas.Count; i++)
+        //    {
+        //        var id1 = instrumentIds[i];
+        //        var name1 = instruments.FirstOrDefault(i => i.Id == id1).Name;
+        //        var deltas1 = instrumentDeltas[id1];
 
-                if (deltas1.Length < 36)
-                {
-                    Console.WriteLine($"[{++count} of ({maxCount}] - Skipping {name1} due to insufficient data (less than 3 years)");
-                    continue; // Skip instruments with less than 3 years of data
-                }
+        //        if (deltas1.Length < 36)
+        //        {
+        //            Console.WriteLine($"[{++count} of ({maxCount}] - Skipping {name1} due to insufficient data (less than 3 years)");
+        //            continue; // Skip instruments with less than 3 years of data
+        //        }
 
-                for (int j = i + 1; j < instrumentDeltas.Count; j++)
-                {
-                    var id2 = instrumentIds[j];
+        //        for (int j = i + 1; j < instrumentDeltas.Count; j++)
+        //        {
+        //            var id2 = instrumentIds[j];
 
-                    //if (existingCorrelations.Any(c => (c.Instrument1Id == id1 && c.Instrument2Id == id2)))
-                    //{
-                    //    Console.WriteLine($"[{++count} of ({maxCount}] - Skipping existing correlation between {name1} and {instruments.FirstOrDefault(i => i.Id == id2).Name}");
-                    //    continue; // Skip if correlation already exists
-                    //}
+        //            //if (existingCorrelations.Any(c => (c.Instrument1Id == id1 && c.Instrument2Id == id2)))
+        //            //{
+        //            //    Console.WriteLine($"[{++count} of ({maxCount}] - Skipping existing correlation between {name1} and {instruments.FirstOrDefault(i => i.Id == id2).Name}");
+        //            //    continue; // Skip if correlation already exists
+        //            //}
 
-                    var name2 = instruments.FirstOrDefault(j => j.Id == id2).Name;
-                    var deltas2 = instrumentDeltas[id2];
+        //            var name2 = instruments.FirstOrDefault(j => j.Id == id2).Name;
+        //            var deltas2 = instrumentDeltas[id2];
 
-                    if (deltas2.Length < 36)
-                    {
-                        continue; // Skip instruments with less than 3 years of data
-                    }
+        //            if (deltas2.Length < 36)
+        //            {
+        //                continue; // Skip instruments with less than 3 years of data
+        //            }
 
-                    var correlation = double.NaN;
-                    if (deltas1.Length == deltas2.Length)
-                    {
-                        // Both 5 Year worth of data
-                        correlation = MathNet.Numerics.Statistics.Correlation.Pearson(deltas1, deltas2);
-                    }
-                    else
-                    {
-                        // If not equal, try correlating down to 3 years, below that ignore
-                        var minLength = Math.Min(deltas1.Length, deltas2.Length);
+        //            var correlation = double.NaN;
+        //            if (deltas1.Length == deltas2.Length)
+        //            {
+        //                // Both 5 Year worth of data
+        //                correlation = MathNet.Numerics.Statistics.Correlation.Pearson(deltas1, deltas2);
+        //            }
+        //            else
+        //            {
+        //                // If not equal, try correlating down to 3 years, below that ignore
+        //                var minLength = Math.Min(deltas1.Length, deltas2.Length);
 
-                        double[] instrument1Deltas = [.. deltas1.Take(minLength)];
-                        double[] instrument2Deltas = [.. deltas2.Take(minLength)];
-                        correlation = MathNet.Numerics.Statistics.Correlation.Pearson(instrument1Deltas, instrument2Deltas);
-                    }
+        //                double[] instrument1Deltas = [.. deltas1.Take(minLength)];
+        //                double[] instrument2Deltas = [.. deltas2.Take(minLength)];
+        //                correlation = MathNet.Numerics.Statistics.Correlation.Pearson(instrument1Deltas, instrument2Deltas);
+        //            }
 
-                    string msg;
-                    if (double.IsNaN(correlation))
-                    {
-                        msg = $"[{++count} of ({maxCount}] - Unable to calculate Correlation between {name1} and {name2}: {correlation:F4}";
-                    }
-                    else
-                    {
-                        var existingCorrelation = await dbCorrelations.Where(c => c.Instrument1Id==id1 && c.Instrument2Id==id2).FirstOrDefaultAsync();
+        //            string msg;
+        //            if (double.IsNaN(correlation))
+        //            {
+        //                msg = $"[{++count} of ({maxCount}] - Unable to calculate Correlation between {name1} and {name2}: {correlation:F4}";
+        //            }
+        //            else
+        //            {
+        //                var existingCorrelation = await dbCorrelations.Where(c => c.Instrument1Id==id1 && c.Instrument2Id==id2).FirstOrDefaultAsync();
 
-                        if (existingCorrelation == null)
-                        {
-                            dbCorrelations.Add(new EntityModel.Correlation
-                            {
-                                Instrument1Id = id1,
-                                Instrument2Id = id2,
-                                Value = correlation
-                            });
-                        }
-                        else
-                        {
-                            existingCorrelation.Value = correlation;
-                        }
-                        msg = $"[{++count} of ({maxCount}] - Correlation between {name1} and {name2}: {correlation:F4}";
-                    }
-                    Console.WriteLine(msg);
-                }
+        //                if (existingCorrelation == null)
+        //                {
+        //                    dbCorrelations.Add(new EntityModel.Correlation
+        //                    {
+        //                        Instrument1Id = id1,
+        //                        Instrument2Id = id2,
+        //                        Value = correlation
+        //                    });
+        //                }
+        //                else
+        //                {
+        //                    existingCorrelation.Value = correlation;
+        //                }
+        //                msg = $"[{++count} of ({maxCount}] - Correlation between {name1} and {name2}: {correlation:F4}";
+        //            }
+        //            Console.WriteLine(msg);
+        //        }
 
-                // Save changes periodically per Instrument
-                context.SaveChanges();
-            }
-        }
+        //        // Save changes periodically per Instrument
+        //        context.SaveChanges();
+        //    }
+        //}
 
         public async Task SetMaxDrawdown()
         {
@@ -527,11 +475,11 @@ namespace Portfolio.Calculation
         private static double? CalculateMaxDrawdown(ICollection<Price> prices)
         {
             var pricesList 
-                = prices.Where(p => p.Date >= System.DateOnly.FromDateTime(DateTime.Now.AddYears(-5)))
+                = prices.Where(p => p.Date >= DateOnly.FromDateTime(DateTime.Now.AddYears(-6)))
                         .OrderBy(p => p.Date)
                         .ToList();
 
-            if (prices == null || prices.Count < 2)
+            if (pricesList?.Count() < 2)
             {
                 return null;
             }

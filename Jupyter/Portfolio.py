@@ -1,7 +1,5 @@
 from collections import OrderedDict
-from datetime import timedelta
 from typing import List
-from colorhash import ColorHash
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
@@ -28,6 +26,28 @@ STAT_FUNCS_PCT = [
     "Max drawdown",
     "Daily value at risk",
     "Daily turnover",
+]
+
+OBSERVABLE10_SET2_COLOURS = [
+    "#5B8FF9",
+    "#5AD8A6",
+    "#5D7092",
+    "#F6BD16",
+    "#E86452",
+    "#6DC8EC",
+    "#9270CA",
+    "#FF9D4D",
+    "#269A99",
+    "#FF99C3",
+    # Set2 colors
+    "#66C2A5",
+    "#FC8D62",
+    "#8DA0CB",
+    "#E78AC3",
+    "#A6D854",
+    "#FFD92F",
+    "#E5C494",
+    "#B3B3B3"
 ]
 
 class Portfolio:
@@ -265,7 +285,7 @@ class Portfolio:
                                         'sharpe_ratio': portf_sharpe_ratio})
         
         # Calculate the efficient frontier to 'efficient_portfolios' variable using scipy.optimize
-        rtns_range = np.linspace(start=0.07, stop=0.13, num=200)
+        rtns_range = np.linspace(start=0.08, stop=0.18, num=200)
         constraints = ({'type': 'eq',
                         'fun': lambda x: np.sum(x) - 1})
 
@@ -323,7 +343,7 @@ class Portfolio:
                     marker='*',
                     s=200,
                     alpha=1,
-                    color=ColorHash(fund.name).hex,
+                    color=OBSERVABLE10_SET2_COLOURS[asset_index],
                     label=fund.short_name())
 
         ax.scatter(x=max_sharpe_portf['Volatility'],   
@@ -356,8 +376,7 @@ class Portfolio:
                                     benchmark_rets=None,
                                     bootstrap=False,
                                     turnover_denom='AGB',
-                                    header_rows=None,
-                                    return_fig=False):
+                                    header_rows=None):
             
         if benchmark_rets is not None:
             returns = utils.clip_returns_to_benchmark(returns, benchmark_rets)
@@ -381,8 +400,10 @@ class Portfolio:
         if benchmark_rets is not None:
             vertical_sections += 1
 
-        fig = plt.figure(figsize=(14, vertical_sections * 4))
-        gs = gridspec.GridSpec(vertical_sections, 3, wspace=0.5, hspace=0.5)
+        # Size the tear sheet canvas
+        plt.figure(figsize=(20, vertical_sections * 6))
+
+        gs = gridspec.GridSpec(vertical_sections, 3, wspace=0.3, hspace=0.3)
 
         i = 2
 
@@ -412,6 +433,7 @@ class Portfolio:
         #ax_covariance_matrix = plt.subplot(gs[i,0])
 
         self.__plot_dataframe_text(performace_stats_df, ax=ax_top_0)
+ 
         self.__plot_heatmap(ax=ax_top_12)
 
         self.__plot_legend(ax_text_table)
@@ -425,6 +447,8 @@ class Portfolio:
         plotting.plot_drawdown_periods(returns, top=5, ax=ax_drawdown)
         plotting.plot_drawdown_underwater(returns=returns, ax=ax_underwater)
 
+        #return
+    
         self.__plot_rolling_returns(returns, factor_returns=benchmark_rets, live_start_date=live_start_date, ax=ax_rolling_returns)
         ax_rolling_returns.set_title('Cumulative returns')
 
@@ -437,11 +461,8 @@ class Portfolio:
         
         #self.plot_backtest_portfolio(max_sharpe_portf, ax=ax_covariance_matrix)
 
-        for ax in fig.axes:
-            plt.setp(ax.get_xticklabels(), visible=True)
-
-        if return_fig:
-            return fig
+        #for ax in fig.axes:
+        #    plt.setp(ax.get_xticklabels(), visible=True)
 
     def __get_portf_rtn(self, w, avg_rtns):
         return np.sum(avg_rtns * w)
@@ -472,8 +493,9 @@ class Portfolio:
 
         legend_elements.append(Line2D([0], [0], color=PORTFOLIO_COLOUR, lw=2, label="Portfolio"))
         legend_elements.append(Line2D([0], [0], color="black", lw=2, label="Benchmark"))
-        for fund in self.fund_selection:
-            legend_elements.append(Line2D([0], [0], color=fund.colour(), lw=1, label=f"{(fund.weight*100):.2f}% - {fund.short_name()}"))
+        for asset_index in range(len(self.fund_selection)):
+            fund = self.fund_selection[asset_index]
+            legend_elements.append(Line2D([0], [0], color=OBSERVABLE10_SET2_COLOURS[asset_index], lw=1, label=f"{(fund.weight*100):.2f}% - {fund.short_name()}"))
 
         ax.axis('off')
         ax.legend(handles=legend_elements, loc='center')
@@ -482,9 +504,17 @@ class Portfolio:
         self, 
         ax
     ):
-        sns.heatmap(self.correlation_matrix, annot=True, fmt=".2f", cmap="Blues", cbar=True, ax=ax, yticklabels=True, xticklabels=False)
+        acwi = 'SPDR MSCI All Cntry Wld ETF GBP'
+
+        funds = self.fund_selection.copy()
+        if not acwi in [fund.name for fund in self.fund_selection]:
+            funds.append(FundSelection(acwi))
+
+        portfolio_with_acwi = Portfolio(funds, self.benchmark, self.price_years)
+        portfolio_with_acwi.correlation_matrix.columns = [str(col)[:20] + ".." for col in portfolio_with_acwi.correlation_matrix]
+
+        sns.heatmap(portfolio_with_acwi.correlation_matrix, annot=True, fmt=".2f", cmap="Blues", cbar=True, ax=ax, yticklabels=True, xticklabels=False)
         plt.title("Correlation Matrix")
-        #plt.tight_layout()
 
         return
 
@@ -553,7 +583,7 @@ class Portfolio:
             fund = self.fund_selection[i]
             fund_cum_returns[i].plot(
                 lw=1, 
-                color=fund.colour(), 
+                color=OBSERVABLE10_SET2_COLOURS[i], 
                 alpha=0.6, 
                 ax=ax, 
                 **kwargs)
@@ -653,6 +683,7 @@ class Portfolio:
             for stat, value in perf_stats[column].items():
                 if stat in STAT_FUNCS_PCT:
                     perf_stats.loc[stat, column] = str(np.round(value * 100, 3)) + "%"
+                    
         if header_rows is None:
             header_rows = date_rows
         else:
@@ -666,6 +697,23 @@ class Portfolio:
             float_format="{0:.2f}".format,
             header_rows=header_rows,
         )
+
+    def export(self, group):
+        portfolio = self._db_query.get_portfolio(self._names_csv)
+    
+        name_weight = {}
+        for i in range(len(self.fund_selection)):
+            name_weight[self.fund_selection[i].name] = self.fund_selection[i].weight
+
+        portfolio['Group'] = [group] * len(self.fund_selection)
+        portfolio['Weight'] = [0] * len(self.fund_selection)
+
+        for i in range(len(portfolio)):
+            name = portfolio.index[i]
+            portfolio.loc[name, 'Weight'] = name_weight[name]
+
+        return portfolio
+
 
 
             
