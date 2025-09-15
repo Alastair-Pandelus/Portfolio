@@ -69,11 +69,11 @@ class Portfolio:
         self._benchmark = benchmark
         self._benchmark_monthly_returns = self.get_monthly_returns(benchmark)
 
-        adjusted_returns, daily_price_history = self.get_daily_adjusted_returns_and_price_history()
+        adjusted_returns, daily_price_history = self._get_daily_adjusted_returns_and_price_history(self._fund_selection)
         self._adjusted_returns = adjusted_returns
         self._daily_price_history = daily_price_history
 
-        benchmark_adjusted_returns, benchmark_daily_price_history = self.get_benchmark_daily_adjusted_returns_and_price_history()
+        benchmark_adjusted_returns, benchmark_daily_price_history = self._get_daily_adjusted_returns_and_price_history(self._benchmark)
         self._benchmark_adjusted_returns = benchmark_adjusted_returns
         self._benchmark_daily_price_history = benchmark_daily_price_history
         
@@ -128,6 +128,11 @@ class Portfolio:
             
         return -1
     
+    def _get_ytd_return(self, name: str):
+        for i in range(len(self._fund_selection)):
+            if(self._adjusted_returns[i].name == name):
+                return 0
+    
     def get_monthly_returns(self, funds: List[FundSelection]):
         monthly_returns = []
 
@@ -155,37 +160,7 @@ class Portfolio:
 
         return df_merged
     
-    from functools import reduce
-
-    def get_daily_adjusted_returns_and_price_history(self):
-        adjusted_returns = self.get_portfolio_daily_adjusted_returns()
-
-        adjusted_returns_df = reduce(lambda left, right: pd.merge(left, right, on=['Date'], how='outer'), adjusted_returns)
-
-        df_cumsum = adjusted_returns_df.cumsum()
-        df_exp = np.exp(df_cumsum) * 100
-        df_prices = df_exp
-        
-        return adjusted_returns_df, df_prices
-    
-    def get_benchmark_daily_adjusted_returns_and_price_history(self):
-        adjusted_returns = self.get_benchmark_daily_adjusted_returns()
-
-        adjusted_returns_df = reduce(lambda left, right: pd.merge(left, right, on=['Date'], how='outer'), adjusted_returns)
-
-        df_cumsum = adjusted_returns_df.cumsum()
-        df_exp = np.exp(df_cumsum) * 100
-        df_prices = df_exp
-        
-        return adjusted_returns_df, df_prices
-    
-    def get_benchmark_daily_adjusted_returns(self):
-        return self.get_daily_adjusted_returns(self._benchmark)
-    
-    def get_portfolio_daily_adjusted_returns(self):
-        return self.get_daily_adjusted_returns(self.fund_selection)
-    
-    def get_daily_adjusted_returns(self, funds: List[FundSelection]):
+    def _get_daily_adjusted_returns_and_price_history(self, funds: List[FundSelection]):
         adjusted_returns = []
 
         #for fund in self._fund_selection: 
@@ -210,7 +185,13 @@ class Portfolio:
 
             adjusted_returns.append(fund_adjusted_returns)
 
-        return adjusted_returns
+        adjusted_returns_df = reduce(lambda left, right: pd.merge(left, right, on=['Date'], how='outer'), adjusted_returns)
+
+        df_cumsum = adjusted_returns_df.cumsum()
+        df_exp = np.exp(df_cumsum) * 100
+        df_prices = df_exp
+
+        return adjusted_returns_df, df_prices
     
     def get_benchmark_daily_price_history(self):
         return self.get_daily_price_history(self._benchmark)
@@ -358,7 +339,7 @@ class Portfolio:
 
         ax.set(xlabel='Volatility',ylabel='Expected Returns', title='Efficient Frontier')
 
-    def plot_returns_tear_sheet(self, max_sharpe_portf):
+    def plot_returns_tear_sheet(self, max_sharpe_portf=None):
         portfolio_returns = self.adjusted_returns.dot(max_sharpe_portf['Weights'])
         benchmark_weights = [f.weight for f in self.benchmark]
         benchmark_returns = self.benchmark_adjusted_returns.dot(benchmark_weights)
@@ -705,11 +686,25 @@ class Portfolio:
         for i in range(len(self.fund_selection)):
             name_weight[self.fund_selection[i].name] = self.fund_selection[i].weight
 
+        portfolio['YTD'] = [0] * len(self.fund_selection)
         portfolio['Group'] = [group] * len(self.fund_selection)
         portfolio['Weight'] = [0] * len(self.fund_selection)
 
+        this_year = pd.Timestamp.now().year
+        this_years_prices = self._daily_price_history[self._daily_price_history.index.year == this_year]
+
         for i in range(len(portfolio)):
             name = portfolio.index[i]
+
+            # YTD
+            this_years_fund_prices = this_years_prices[name].dropna()
+            first_price = this_years_fund_prices.iloc[0]
+            last_price = this_years_fund_prices.iloc[-1]
+            ytd = ((last_price - first_price) / first_price)
+
+            portfolio.loc[name, 'YTD'] = ytd
+
+            # Weight
             portfolio.loc[name, 'Weight'] = name_weight[name]
 
         return portfolio

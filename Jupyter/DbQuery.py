@@ -62,6 +62,8 @@ class DbQuery:
         return df
 
     def get_portfolio(self, names_csv):
+        # 2019 returns manually added later for now
+
         query = f"""select 
 	Name, 
 	InstrumentType as Type, 
@@ -82,6 +84,7 @@ class DbQuery:
 	OngoingCharge as 'Charge',
 	Correlation as 'Corr',
 	MaxDrawdown as 'Drawdown',
+    0 as '2019', 
 	YR_ReturnM12_5 / 100.0 as '2020',
 	YR_ReturnM12_4 / 100.0 as '2021',
 	YR_ReturnM12_3 / 100.0 as '2022',
