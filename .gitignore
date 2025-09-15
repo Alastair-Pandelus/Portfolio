@@ -367,3 +367,4 @@ FodyWeavers.xsd
 /Portfolio/Scrape/Model/RiskAndRatings/*.json
 /Portfolio/Scrape/Model/Chart/*.json
 /Jupyter/portfolio.csv
+/Jupyter/Portfolio.xlsx
