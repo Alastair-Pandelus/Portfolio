@@ -1,6 +1,6 @@
 # Portfolio
 
-Tactical side project  (not 100% polished!)... real world prooblem used to learn Python
+Tactical side project  (not 100% polished!)... real world problem used to learn Python
 
 The project is composed of :-
 
