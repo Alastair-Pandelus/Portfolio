@@ -4,10 +4,10 @@ import numpy as np
 import pandas as pd
 import pandera as pa
 from datetime import datetime, timedelta
-from FundSelection import FundSelection
-from MonteCarlo import MonteCarlo
-from MonteCarloResult import MonteCarloResult
-from Portfolio import Portfolio
+from Py_FundSelection import FundSelection
+from Py_MonteCarlo import MonteCarlo
+from Py_MonteCarloResult import MonteCarloResult
+from Py_Portfolio import Portfolio
 
 FUND_COUNT = 4
 PRICES_YEARS = 10

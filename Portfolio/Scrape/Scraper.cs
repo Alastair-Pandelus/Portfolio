@@ -661,7 +661,9 @@ namespace Portfolio.Scrape
 
             Instrument[] manualInstruments =
             [
-                new() { ISIN = "LU1001748638", Name="JPM Europe Equity Absolute Alpha C (perf) (dist) - GBP (hedged)", Currency="GBP", Sedol="BH4GX47", Y_Symbol="0P00011M7T.L", InstrumentType="Fund", Distribution="acc" }
+                new() { ISIN = "LU1001748638", Name="JPM Europe Equity Absolute Alpha C (perf) (dist) - GBP (hedged)", Currency="GBP", Sedol="BH4GX47", Y_Symbol="0P00011M7T.L", InstrumentType="Fund", Distribution="acc" },
+                new() { ISIN = "GB00B4K6P774", Name="Royal London Diversified ABS Fund Z Acc", Currency="GBP", Sedol="B4K6P77", Y_Symbol="0P0000X6KR.L", InstrumentType="Fund", Distribution="acc" },
+                new() { ISIN = "IE00BP268849", Name="Royal London Abs Ret Govt Bd M GBP Acc", Currency="GBP", Sedol="BP26884", Y_Symbol="0P00015F9D.L", InstrumentType="Fund", Distribution="acc" },
             ];
 
             foreach(Instrument manualInstrument in manualInstruments)

@@ -1,8 +1,8 @@
 from typing import List
 import numpy as np
 import pandas as pd
-from MonteCarloResult import MonteCarloResult
-from Portfolio import Portfolio
+from Py_MonteCarloResult import MonteCarloResult
+from Py_Portfolio import Portfolio
 
 class MonteCarlo:
     def __init__(self, portfolio: Portfolio, min_return: float, max_return: float, min_allocation: float, max_allocation:float, max_drawdown: float):

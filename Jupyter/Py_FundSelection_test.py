@@ -1,5 +1,5 @@
 import unittest
-from FundSelection import FundSelection
+from Py_FundSelection import FundSelection
 
 class TestFundSelection(unittest.TestCase):
     def test_initialization_with_name_and_weight(self):

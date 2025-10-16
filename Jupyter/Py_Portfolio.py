@@ -4,9 +4,8 @@ from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
 from functools import reduce
-from DbQuery import DbQuery
 from DataframeTypes import fund_monthly_returns_type_schema, fund_adjusted_returns_type_schema
-from FundSelection import FundSelection
+from Py_FundSelection import FundSelection
 import scipy.optimize as sco
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
@@ -14,6 +13,7 @@ from pyfolio import utils, plotting, timeseries
 import empyrical as ep
 import matplotlib.gridspec as gridspec
 import seaborn as sns
+from Py_DbQuery import DbQuery
 
 TRADING_DAYS_IN_YEAR = 252
 APPROX_BDAYS_PER_MONTH = 21
@@ -51,7 +51,7 @@ OBSERVABLE10_SET2_COLOURS = [
 ]
 
 class Portfolio:
-    def __init__(self, fund_selection: List[FundSelection], benchmark: List[FundSelection], price_years: int):
+    def __init__(self, fund_selection: List[FundSelection], benchmark: List[FundSelection], price_years: int, monte_carlo_iterations: int, risk_free_rate: float):
         self._db_query = DbQuery()
 
         self._fund_selection = fund_selection
@@ -65,17 +65,21 @@ class Portfolio:
         self._covariance_matrix = monthly_returns.cov()
 
         self._names_csv = ', '.join([f"'{f.name}'" for f in self.fund_selection])
-
-        self._benchmark = benchmark
-        self._benchmark_monthly_returns = self.get_monthly_returns(benchmark)
-
         adjusted_returns, daily_price_history = self._get_daily_adjusted_returns_and_price_history(self._fund_selection)
         self._adjusted_returns = adjusted_returns
         self._daily_price_history = daily_price_history
 
-        benchmark_adjusted_returns, benchmark_daily_price_history = self._get_daily_adjusted_returns_and_price_history(self._benchmark)
-        self._benchmark_adjusted_returns = benchmark_adjusted_returns
-        self._benchmark_daily_price_history = benchmark_daily_price_history
+        self._benchmark = benchmark
+        if self._benchmark != None:
+            self._benchmark_monthly_returns = self.get_monthly_returns(benchmark)
+            benchmark_adjusted_returns, benchmark_daily_price_history = self._get_daily_adjusted_returns_and_price_history(self._benchmark)
+            self._benchmark_adjusted_returns = benchmark_adjusted_returns
+            self._benchmark_daily_price_history = benchmark_daily_price_history
+
+        self._monte_carlo_iterations = monte_carlo_iterations
+        self._risk_free_rate = risk_free_rate
+
+        self._max_sharpe_portfolio = self.get_max_sharpe_portfolio()
         
     @property
     def fund_selection(self):
@@ -118,8 +122,20 @@ class Portfolio:
         return self._benchmark        
 
     @property
-    def benchmark_montly_returns(self):
+    def benchmark_monthly_returns(self):
         return self._benchmark_monthly_returns
+    
+    @property
+    def max_sharpe_portfolio(self):
+        return self._max_sharpe_portfolio
+    
+    @property 
+    def has_fixed_weights(self):
+        for i in range(len(self._fund_selection)):
+            if(self._fund_selection[i].weight == None):
+                return False
+            
+        return True
     
     def get_weight(self, name: str):
         for i in range(len(self._fund_selection)):
@@ -161,6 +177,8 @@ class Portfolio:
         return df_merged
     
     def _get_daily_adjusted_returns_and_price_history(self, funds: List[FundSelection]):
+        min_date = pd.Timestamp.today() - pd.DateOffset(years=self._price_years) + pd.DateOffset(days=3)
+        
         adjusted_returns = []
 
         #for fund in self._fund_selection: 
@@ -169,16 +187,19 @@ class Portfolio:
 
             fund_adjusted_returns = self._db_query.get_daily_log_adjusted_return(fund.name, self._price_years, fund.proxy_funds)
 
-            min_date = fund_adjusted_returns.index.min()
+            min_fund_adjusted_returns_date = fund_adjusted_returns.index.min()
             proxy_funds_adjusted_returns = pd.DataFrame()
 
-            if min_date > (pd.Timestamp.today() - pd.DateOffset(years=self._price_years) + pd.DateOffset(days=3)):
+            if min_fund_adjusted_returns_date > min_date:
                 for proxy_fund in fund.proxy_funds:
                     proxy_fund_adjusted_returns = self._db_query.get_daily_log_adjusted_return(proxy_fund.name, self._price_years)
-                    proxy_fund_adjusted_returns = proxy_fund_adjusted_returns.loc[proxy_fund_adjusted_returns.index < min_date] * proxy_fund.weight
+                    proxy_fund_adjusted_returns = proxy_fund_adjusted_returns.loc[proxy_fund_adjusted_returns.index < min_fund_adjusted_returns_date] * proxy_fund.weight
                     proxy_funds_adjusted_returns = proxy_funds_adjusted_returns.add(proxy_fund_adjusted_returns, fill_value=0)
 
                 fund_adjusted_returns = fund_adjusted_returns.combine_first(proxy_funds_adjusted_returns)
+
+                if fund_adjusted_returns.index[0] > min_date:
+                    raise Exception(f"Fund {fund.name} only has pricing data from {fund_adjusted_returns.index[0]}, expecting > {min_date}")
 
             fund_adjusted_returns_type_schema.validate(fund_adjusted_returns)
             fund_adjusted_returns = fund_adjusted_returns.rename(columns={'LogValue': fund.name})
@@ -241,11 +262,11 @@ class Portfolio:
         return efficient_portfolios
 
     # Optimize weights using Monte Carlo simulation and scipy.optimize
-    def optimize_weights(self, iterations, risk_free_rate):
+    def get_max_sharpe_portfolio(self):
         # make it deterministic
         np.random.seed(42)
 
-        weights = np.random.random(size=(iterations, len(self.fund_selection)))
+        weights = np.random.random(size=(self._monte_carlo_iterations, len(self.fund_selection)))
         weights /= np.sum(weights, axis=1)[:, np.newaxis]
 
         avg_returns = self._adjusted_returns.mean() * TRADING_DAYS_IN_YEAR
@@ -259,7 +280,7 @@ class Portfolio:
             portf_vol.append(np.sqrt(np.dot(weights[i].T, np.dot(cov_mat, weights[i]))))
 
         portf_vol = np.array(portf_vol)
-        portf_sharpe_ratio = (portf_rtns - risk_free_rate) / portf_vol
+        portf_sharpe_ratio = (portf_rtns - self._risk_free_rate) / portf_vol
 
         portf_results_df = pd.DataFrame({'returns': portf_rtns,
                                         'volatility': portf_vol,
@@ -274,7 +295,7 @@ class Portfolio:
         efficient_portfolios = self.__get_efficient_frontier(avg_returns, cov_mat, rtns_range)
         vols_range = [x['fun'] for x in efficient_portfolios]
         n_assets = len(avg_returns)
-        args = (avg_returns, cov_mat, risk_free_rate)
+        args = (avg_returns, cov_mat, self._risk_free_rate)
         bounds = tuple((0,1) for asset in range(n_assets))
         initial_guess = n_assets * [1. / n_assets]
         max_sharpe_portf = sco.minimize(self.__neg_sharpe_ratio,
@@ -283,73 +304,40 @@ class Portfolio:
                                         method='SLSQP',
                                         bounds=bounds,
                                         constraints=constraints)
-        max_sharpe_portf_weights = max_sharpe_portf['x']
+        weights = max_sharpe_portf['x']
+
         max_sharpe_portf = {
             'AverageReturns': avg_returns,
             'CovarianceMatrix': cov_mat,
             'VolsRange': vols_range,
             'ReturnsRange': rtns_range,
             'Results': portf_results_df,
-            'Return': self.__get_portf_rtn(max_sharpe_portf_weights, avg_returns),
-            'Volatility': self.__get_portf_vol(max_sharpe_portf_weights, avg_returns, cov_mat),
-            'Sharpe Ratio': -max_sharpe_portf['fun'],
-            'Weights': max_sharpe_portf_weights
+            'Return': self.__get_portf_rtn(weights, avg_returns),
+            'Volatility': self.__get_portf_vol(weights, avg_returns, cov_mat),
+            'Sharpe Ratio': -max_sharpe_portf['fun']
         }
 
-        # update weights in fund_selection, this also updates the proxy funds in fund_selection
-        for i in range(len(self._fund_selection)):
-            self._fund_selection[i].weight = max_sharpe_portf['Weights'][i]        
+        if not self.has_fixed_weights:
+            # update weights in fund_selection, this also updates the proxy funds in fund_selection
+            for i in range(0, len(weights)):
+                self.fund_selection[i].weight = weights[i]
         
         return max_sharpe_portf
     
-    #Plot the calculated Efficient Frontier, together with the simulated portfolios
-    def __plot_efficient_frontier(self, max_sharpe_portf, ax=None):
-        if ax == None:
-            ax = plt.subplots()
+    def plot_returns_tear_sheet(self):
+        weights = [f.weight for f in self._fund_selection]
+        portfolio_returns = self.adjusted_returns.dot(weights)
 
-        max_sharpe_portf['Results'].plot(kind='scatter', x='volatility',
-                             y='returns', c='sharpe_ratio',
-                             cmap='turbo', edgecolors='white',
-                             alpha=0.6,
-                             ax=ax)
+        benchmark_returns = None
+        if self.benchmark != None:
+            benchmark_weights = [b.weight for b in self.benchmark]
+            benchmark_returns = self.benchmark_adjusted_returns.dot(benchmark_weights)
 
-        # draw the efficient frontier lines
-        ax.plot(max_sharpe_portf['VolsRange'], max_sharpe_portf['ReturnsRange'], 'b--', linewidth=2, alpha=0.3)
-
-        # Add full individual funds    
-        for asset_index in range(len(self.fund_selection)):
-            fund = self.fund_selection[asset_index]
-            ax.scatter(x=np.sqrt(max_sharpe_portf['CovarianceMatrix'].iloc[asset_index, asset_index]),
-                    y=max_sharpe_portf['AverageReturns'][asset_index],
-                    marker='*',
-                    s=200,
-                    alpha=1,
-                    color=OBSERVABLE10_SET2_COLOURS[asset_index],
-                    label=fund.short_name())
-
-        ax.scatter(x=max_sharpe_portf['Volatility'],   
-                y=max_sharpe_portf['Return'],
-                marker='*',
-                s=240,
-                alpha=1,
-                color=PORTFOLIO_COLOUR, edgecolors='black', linewidths=1,
-                label='Max Sharpe Ratio (Full)')    
-
-        ax.legend(fontsize='small')
-
-        ax.set(xlabel='Volatility',ylabel='Expected Returns', title='Efficient Frontier')
-
-    def plot_returns_tear_sheet(self, max_sharpe_portf=None):
-        portfolio_returns = self.adjusted_returns.dot(max_sharpe_portf['Weights'])
-        benchmark_weights = [f.weight for f in self.benchmark]
-        benchmark_returns = self.benchmark_adjusted_returns.dot(benchmark_weights)
-
-        return self.__create_returns_tear_sheet(portfolio_returns, max_sharpe_portf=max_sharpe_portf, benchmark_rets=benchmark_returns)
+        return self.__create_returns_tear_sheet(portfolio_returns, benchmark_rets=benchmark_returns)
 
     # https://github.com/quantopian/pyfolio/blob/master/pyfolio/tears.py#L409
     def __create_returns_tear_sheet(self, 
                                     returns, 
-                                    max_sharpe_portf,
                                     positions=None,
                                     transactions=None,
                                     live_start_date=None,
@@ -370,7 +358,7 @@ class Portfolio:
                                 bootstrap=bootstrap,
                                 live_start_date=live_start_date,
                                 header_rows=header_rows, 
-                                return_df=True).drop('Kurtosis').drop('Calmar ratio').drop('Stability').drop('Omega ratio').drop('Tail ratio').drop('Alpha').drop('Beta').drop('Skew').drop('Daily value at risk')
+                                return_df=True).drop('Skew').drop('Kurtosis').drop('Calmar ratio').drop('Stability').drop('Omega ratio').drop('Tail ratio').drop('Daily value at risk') #.drop('Alpha').drop('Beta')
         
         vertical_sections = 11
 
@@ -384,14 +372,14 @@ class Portfolio:
         # Size the tear sheet canvas
         plt.figure(figsize=(20, vertical_sections * 6))
 
-        gs = gridspec.GridSpec(vertical_sections, 3, wspace=0.3, hspace=0.3)
+        gs = gridspec.GridSpec(nrows=vertical_sections, ncols=3, wspace=0.3, hspace=0.3)
 
         i = 2
 
-        ax_top_0 = plt.subplot(gs[i, 0])
+        ax_top_0 = plt.subplot(gs[:2, 2])
         # correlation matrix spills leftwards
-        ax_top_12 = plt.subplot(gs[i, 2])
-        i+=1 
+        ax_top_12 = plt.subplot(gs[:2, :2])
+        #i+=1 
 
         ax_text_table = plt.subplot(gs[i, 0])
         ax_rolling_returns = plt.subplot(gs[i, 1:])
@@ -437,8 +425,7 @@ class Portfolio:
         plotting.plot_annual_returns(returns, ax=ax_annual_returns)
         plotting.plot_monthly_returns_dist(returns, ax=ax_monthly_dist)
 
-        self.__plot_efficient_frontier(max_sharpe_portf, ax=ax_efficient_frontier)
-
+        self.__plot_efficient_frontier(self._max_sharpe_portfolio, ax=ax_efficient_frontier)
         
         #self.plot_backtest_portfolio(max_sharpe_portf, ax=ax_covariance_matrix)
 
@@ -472,26 +459,30 @@ class Portfolio:
     def __plot_legend(self, ax):
         legend_elements = []
 
-        legend_elements.append(Line2D([0], [0], color=PORTFOLIO_COLOUR, lw=2, label="Portfolio"))
-        legend_elements.append(Line2D([0], [0], color="black", lw=2, label="Benchmark"))
+        legend_elements.append(Line2D([0], [0], color=PORTFOLIO_COLOUR, lw=4, label="Portfolio"))
+
+        if self.benchmark != None:
+            legend_elements.append(Line2D([0], [0], color="black", lw=3, label="Benchmark"))
+
         for asset_index in range(len(self.fund_selection)):
             fund = self.fund_selection[asset_index]
-            legend_elements.append(Line2D([0], [0], color=OBSERVABLE10_SET2_COLOURS[asset_index], lw=1, label=f"{(fund.weight*100):.2f}% - {fund.short_name()}"))
+            legend_elements.append(Line2D([0], [0], color=OBSERVABLE10_SET2_COLOURS[asset_index], lw=2, label=f"{(fund.weight*100):.2f}% - {fund.short_name()}"))
 
         ax.axis('off')
         ax.legend(handles=legend_elements, loc='center')
 
-    def __plot_heatmap(
-        self, 
-        ax
-    ):
+    def __plot_heatmap(self, ax):
         acwi = 'SPDR MSCI All Cntry Wld ETF GBP'
 
-        funds = self.fund_selection.copy()
+        funds = []
+        for i in range(len(self._fund_selection)):
+            existing_fund = self.fund_selection[i]
+            funds.append(FundSelection(existing_fund.name, existing_fund.weight, proxy_funds=existing_fund.proxy_funds))
+
         if not acwi in [fund.name for fund in self.fund_selection]:
             funds.append(FundSelection(acwi))
 
-        portfolio_with_acwi = Portfolio(funds, self.benchmark, self.price_years)
+        portfolio_with_acwi = Portfolio(funds, self.benchmark, self.price_years, 1, self._risk_free_rate)
         portfolio_with_acwi.correlation_matrix.columns = [str(col)[:20] + ".." for col in portfolio_with_acwi.correlation_matrix]
 
         sns.heatmap(portfolio_with_acwi.correlation_matrix, annot=True, fmt=".2f", cmap="Blues", cbar=True, ax=ax, yticklabels=True, xticklabels=False)
@@ -538,7 +529,7 @@ class Portfolio:
         if factor_returns is not None:
             cum_factor_returns = ep.cum_returns(factor_returns.loc[cum_rets.index], 1.0)
             cum_factor_returns.plot(
-                lw=2,
+                lw=3,
                 color="black",
                 alpha=0.8,
                 ax=ax, 
@@ -554,16 +545,17 @@ class Portfolio:
             oos_cum_returns = pd.Series([], dtype="float64")
 
         is_cum_returns.plot(
-            lw=2, 
+            lw=4, 
             color=PORTFOLIO_COLOUR, 
             alpha=0.8, 
             ax=ax, 
             **kwargs
         )
+
         for i in range(len(fund_cum_returns)):
             fund = self.fund_selection[i]
             fund_cum_returns[i].plot(
-                lw=1, 
+                lw=2, 
                 color=OBSERVABLE10_SET2_COLOURS[i], 
                 alpha=0.6, 
                 ax=ax, 
@@ -571,10 +563,10 @@ class Portfolio:
 
         if len(oos_cum_returns) > 0:
             oos_cum_returns.plot(
-                lw=2, color="red", alpha=0.6, label="Live", ax=ax, **kwargs
+                lw=4, color="red", alpha=0.6, label="Live", ax=ax, **kwargs
             )
 
-        ax.axhline(1.0, linestyle="--", color="black", lw=1)
+        ax.axhline(1.0, linestyle="--", color="black", lw=3)
 
         return ax
     
@@ -678,6 +670,43 @@ class Portfolio:
             float_format="{0:.2f}".format,
             header_rows=header_rows,
         )
+
+    #Plot the calculated Efficient Frontier, together with the simulated portfolios
+    def __plot_efficient_frontier(self, max_sharpe_portf, ax=None):
+        if ax == None:
+            ax = plt.subplots()
+
+        max_sharpe_portf['Results'].plot(kind='scatter', x='volatility',
+                             y='returns', c='sharpe_ratio',
+                             cmap='turbo', edgecolors='white',
+                             alpha=0.6,
+                             ax=ax)
+
+        # draw the efficient frontier lines
+        ax.plot(max_sharpe_portf['VolsRange'], max_sharpe_portf['ReturnsRange'], 'b--', linewidth=2, alpha=0.3)
+
+        # Add full individual funds    
+        for asset_index in range(len(self.fund_selection)):
+            fund = self.fund_selection[asset_index]
+            ax.scatter(x=np.sqrt(max_sharpe_portf['CovarianceMatrix'].iloc[asset_index, asset_index]),
+                    y=max_sharpe_portf['AverageReturns'][asset_index],
+                    marker='*',
+                    s=200,
+                    alpha=1,
+                    color=OBSERVABLE10_SET2_COLOURS[asset_index],
+                    label=fund.short_name())
+
+        ax.scatter(x=max_sharpe_portf['Volatility'],   
+                y=max_sharpe_portf['Return'],
+                marker='*',
+                s=240,
+                alpha=1,
+                color=PORTFOLIO_COLOUR, edgecolors='black', linewidths=1,
+                label='Max Sharpe Ratio (Full)')    
+
+        ax.legend(fontsize='small')
+
+        ax.set(xlabel='Volatility',ylabel='Expected Returns', title='Efficient Frontier')
 
     def export(self, group):
         portfolio = self._db_query.get_portfolio(self._names_csv)

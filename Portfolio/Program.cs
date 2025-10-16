@@ -69,8 +69,8 @@ static void ConfigureServices(ServiceCollection services, IConfigurationRoot con
         {
             client.BaseAddress = new Uri(doofusQueryBaseUrl);
         })
-        .AddPolicyHandler(retryPolicy);
-        //.AddHttpMessageHandler<PassthroughHandler>();
+        .AddPolicyHandler(retryPolicy)
+        .AddHttpMessageHandler<PassthroughHandler>();
 
     services.AddHttpClient(nameof(IScraper)).AddPolicyHandler(retryPolicy);
 }
